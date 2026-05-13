@@ -28,7 +28,7 @@ from omegaconf import OmegaConf
 import pickle
 
 # from utils.dataset import SegmentationDataset
-from utils.dataset_fusion import SegmentationDataset#, SegFusionDataset, DatasetProxy
+from utils.dataset import SegmentationDataset#, SegFusionDataset, DatasetProxy
 from utils.trainer import TrainValMetricsTrainer, MultiScaleFusionModel, collate_with_filename, logits_to_preds
 from utils.metrics import compute_metrics
 from utils.callbacks import MetricsCallback, SavesCurrentStateCallback
