@@ -1,0 +1,596 @@
+import os
+import sys
+import numpy as np
+from PIL import Image
+import matplotlib.pyplot as plt
+import matplotlib.cm as cm
+import torch
+import rasterio
+import requests
+import datetime
+import json
+import torch
+import torch.nn.functional as F
+from PIL import Image
+from itertools import product
+from time import time
+import tifffile as tiff
+from tqdm import tqdm
+
+if __name__ == "__main__":
+    sys.path.append(os.getcwd())
+
+from inference import predict_image
+from transformers import AutoImageProcessor, SegformerForSemanticSegmentation
+from utils.dataset_fusion import get_multiscale_patch
+
+
+# ===========================================
+# ==== DOWNLOADING TILES ====================
+# =========================================== 
+def download_tile(E, N, dest, suffixe=''):
+    """
+    Download a SwissImage tile from the Swisstopo API for given Swiss grid coordinates.
+    Parameters:
+        E (int) - Swiss grid Easting tile coordinate.
+        N (int) - Swiss grid Northing tile coordinate.
+        dest (str) - destination directory where the tile will be saved.
+        suffixe (str) - optional suffix added to the output filename.
+    Returns:
+        str | None - path to the downloaded tile file, or None if no tile was found.
+    """
+    year = datetime.date.today().year
+    url_img = f"https://data.geo.admin.ch/ch.swisstopo.swissimage-dop10/swissimage-dop10_{year}_{E}-{N}/swissimage-dop10_{year}_{E}-{N}_0.1_2056.tif"
+    count_down = 0
+    while requests.get(url_img).status_code != 200:
+        if count_down > 10:
+            print(f"Could not find a tile for coordinates {E}-{N}")
+            return
+        year -= 1
+        count_down += 1
+        url_img = f"https://data.geo.admin.ch/ch.swisstopo.swissimage-dop10/swissimage-dop10_{year}_{E}-{N}/swissimage-dop10_{year}_{E}-{N}_0.1_2056.tif"
+
+    img_data = requests.get(url_img).content
+    if suffixe != '':
+        file_src = os.path.join(dest, f"tile_{E}-{N}_{year}_{suffixe}.tif")
+    else:
+        file_src = os.path.join(dest, f"tile_{E}-{N}_{year}.tif")
+    with open(file_src, 'wb') as handler:
+        handler.write(img_data)
+    return file_src
+
+
+# ===========================================
+# ==== PREDICTIONS ===========================
+# ===========================================
+def mirror_pad_image(img, tile_size, stride):
+    """
+    Pad an image using mirror reflection so that sliding-window tiling fits exactly.
+    Parameters:
+        img (np.ndarray) - input image array (H, W, C).
+        tile_size (int) - size of the inference tiles.
+        stride (int) - stride between tiles.
+    Returns:
+        tuple - padded image array, padding added (pad_h, pad_w), and original image size (H, W).
+    """
+    H, W = img.shape[:2]
+
+    pad_h = (stride - (H - tile_size) % stride) % stride
+    pad_w = (stride - (W - tile_size) % stride) % stride
+
+    padded = np.pad(
+        img,
+        ((0, pad_h),
+         (0, pad_w),
+         (0, 0)),
+        mode="reflect"
+    )
+
+    return padded, (pad_h, pad_w), (H, W)
+
+
+def mirror_pad_image_fusion(img, tile_size, stride):
+    """
+    Pad an image using mirror reflection for fusion-model tiling inference.
+    Parameters:
+        img (np.ndarray) - input image array (H, W, C).
+        tile_size (int) - size of the inference tiles.
+        stride (int) - stride between tiles.
+    Returns:
+        tuple - padded image array, padding added (pad_h, pad_w), and original image size (H, W).
+    """
+    H, W = img.shape[:2]
+
+    # base_pad = (tile_size - 2048) // 2
+    base_pad = 0
+    pad_h = (stride - (H - tile_size) % stride) % stride
+    pad_w = (stride - (W - tile_size) % stride) % stride
+
+    padded = np.pad(
+        img,
+        ((base_pad, pad_h + base_pad),
+         (base_pad, pad_w + base_pad),
+         (0, 0)),
+        mode="reflect"
+    )
+
+    return padded, (pad_h, pad_w), (H, W)
+
+
+def load_latest_checkpoint(model_dir, verbose=False):
+    """
+    Retrieve the latest checkpoint directory inside a model directory.
+    Parameters:
+        model_dir (str) - directory containing model checkpoints.
+        verbose (bool) - whether to print information about the selected checkpoint.
+    Returns:
+        str - path to the latest checkpoint folder or the base model directory if none found.
+    """
+    if not os.path.isdir(model_dir):
+        raise ValueError(f"Model directory not found: {model_dir}")
+
+    ckpts = [d for d in os.listdir(model_dir) if d.startswith("checkpoint-")]
+    if not ckpts and verbose:
+        print("[INFO] No checkpoints found. Using main model directory.")
+        return model_dir
+
+    # Sort by step number
+    ckpts_sorted = sorted(ckpts, key=lambda x: int(x.split("-")[1]))
+    last_ckpt = ckpts_sorted[-1]
+    with open(os.path.join(model_dir, 'last_checkpoint/trainer_state.json'), "r") as jsonfile: 
+        infos = json.load(jsonfile)
+    best_model = infos['best_model_checkpoint']
+    if verbose:
+        print(f"[INFO] Using checkpoint: {best_model}")
+    return best_model
+    return os.path.join(model_dir, last_ckpt)
+
+
+def gaussian_weight(size, sigma=0.125):
+    """
+    Generate a Gaussian weighting mask used for blending overlapping tiles.
+    Parameters:
+        size (int) - size of the square weight matrix.
+        sigma (float) - standard deviation controlling Gaussian spread.
+    Returns:
+        np.ndarray - 2D Gaussian weight map of shape (size, size).
+    """
+    ax = np.linspace(-1, 1, size)
+    xx, yy = np.meshgrid(ax, ax)
+    return np.exp(-(xx**2 + yy**2) / (2 * sigma**2))
+
+
+def predict(image, model_dir, img_path=None, tile_size=512, stride=256, th=0.5, output_format='png', do_show=True, do_save=True, do_save_mask_as_img=True):
+    """
+    Run sliding-window inference on a large image using a segmentation model.
+    Parameters:
+        image (str | PIL.Image) - input image path or PIL image.
+        model_dir (str) - directory containing the trained model.
+        img_path (str | None) - original image path used for saving results.
+        tile_size (int) - size of sliding-window tiles.
+        stride (int) - stride between tiles.
+        th (float) - probability threshold used to convert probabilities into labels.
+        output_format (str) - format used when saving output masks.
+        do_show (bool) - whether to display the prediction result.
+        do_save (bool) - whether to save prediction outputs.
+        do_save_mask_as_img (bool) - whether to save an RGB visualization of the mask.
+    Returns:
+        tuple - binary prediction mask, RGB visualization mask, and probability map.
+    """
+    if not isinstance(image, Image.Image):
+        img_path = image
+        image = Image.open(image)
+    img_arr = np.array(image)
+
+    img_padded, _, _ = mirror_pad_image(img_arr, tile_size, stride)
+    H_original, W_original  = img_arr.shape[:2]
+    H, W = img_padded.shape[:2]
+    
+    # prepare arrays
+    prob_acc = np.zeros((H,W), dtype=np.float32)
+    weight_acc = np.zeros((H,W), dtype=np.float32)
+    weights = gaussian_weight(tile_size)
+
+    # load model
+    ckpt_path = load_latest_checkpoint(model_dir, verbose=True)
+    processor = AutoImageProcessor.from_pretrained(ckpt_path)
+    model = SegformerForSemanticSegmentation.from_pretrained(ckpt_path)
+    DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+    model.to(DEVICE)
+    model.eval()
+    time_to_predict = 0
+    for x in range(0, W - tile_size + 1, stride):# manage if borders reached
+        for y in range(0, H - tile_size + 1, stride):
+            x0 = min(x, W - tile_size)
+            y0 = min(y, H - tile_size)
+
+            # Crop region (handles border tiles automatically)
+            tile = img_padded[y0:y0 + tile_size, x0:x0 + tile_size, :]
+            tile_PIL = Image.fromarray(tile).convert("RGB")
+            dt = time()
+            _, logits  = predict_image(model, processor, tile_PIL, DEVICE)
+            time_to_predict += time() - dt
+            prob = torch.softmax(logits, dim=1).cpu().numpy()
+            landslide_prob = prob[:, 1].reshape((tile_size, tile_size))
+            prob_acc[y0:y0+tile_size, x0:x0+tile_size] += landslide_prob
+            weight_acc[y0:y0+tile_size, x0:x0+tile_size] += 1
+
+    print("TIME USED BY THE MODEL: ", time_to_predict)
+    full_prob = prob_acc / np.maximum(weight_acc, 1e-6)
+    final_prob = full_prob[0:H_original, 0:W_original]
+    
+    final_labels = np.zeros(final_prob.shape)
+    final_labels[final_prob >= th] = 1
+
+    src_dest_preds_mask = os.path.splitext(img_path)[0] + f'_preds_mask.{output_format}'
+    src_dest_preds_img = os.path.splitext(img_path)[0] + f'_preds_img.{output_format}'
+
+    rgb_labels = np.zeros((final_labels.shape[0], final_labels.shape[1], 3))
+    rgb_labels[final_labels == 1] = 255
+    if do_save:
+        os.makedirs(os.path.dirname(src_dest_preds_mask), exist_ok=True)
+        Image.fromarray(final_labels.astype(np.uint8), mode='L').save(src_dest_preds_mask)
+        if do_save_mask_as_img:
+            Image.fromarray(rgb_labels.astype(np.uint8), mode='RGB').save(src_dest_preds_img)
+    
+    if do_show:
+        plt.imshow(Image.fromarray(rgb_labels.astype(np.uint8), mode="RGB"))
+
+    return final_labels, rgb_labels, final_prob
+
+
+def predict_batch_array_fusion(
+    model,
+    batch,
+    do_keep_weights=True,
+    device="cuda",
+):
+    """
+    Run batched inference on a set of image tiles using the fusion model.
+    Parameters:
+        model (torch.nn.Module) - fusion segmentation model.
+        batch (torch.Tensor) - batch of images with shape (B, H, W, 3).
+        do_keep_weights (bool) - whether to return fusion weights.
+        device (str) - computation device ("cuda" or "cpu").
+    Returns:
+        model output containing logits and optionally fusion weights.
+    """
+
+    _,  H, W, _ = batch.shape
+
+    batch = batch / 255.0
+    mean = torch.tensor([0.485, 0.456, 0.406], device=device).view(1,1,1,3)
+    std  = torch.tensor([0.229, 0.224, 0.225], device=device).view(1,1,1,3)
+    batch = (batch - mean) / std
+
+    with torch.no_grad():
+        output = model(
+            pixel_values=torch.moveaxis(batch, 3, 1),
+            return_weights=do_keep_weights,
+            )
+
+    return output  # keep on GPU
+
+
+def predict_batch_array(
+    model,
+    batch,
+    device="cuda",
+):
+    """
+    Run batched inference on image tiles using a segmentation model.
+    Parameters:
+        model (torch.nn.Module) - segmentation model.
+        batch (torch.Tensor) - batch of images with shape (B, H, W, 3).
+        device (str) - computation device ("cuda" or "cpu").
+    Returns:
+        torch.Tensor - upsampled logits with shape (B, C, H, W).
+    """
+
+    assert batch.ndim == 4 and batch.shape[-1] == 3
+
+    _, H, W, _ = batch.shape
+    batch = batch.permute(0, 3, 1, 2)                  # (B, 3, H, W)
+    batch = batch.float() / 255.0
+    mean = torch.tensor([0.485, 0.456, 0.406], device=device).view(1,3,1,1)
+    std  = torch.tensor([0.229, 0.224, 0.225], device=device).view(1,3,1,1)
+    batch = (batch - mean) / std
+
+    with torch.no_grad(), torch.autocast("cuda", dtype=torch.float16):
+        logits = model(batch).logits  # (B,C,h,w)
+
+        logits = F.interpolate(
+            logits,
+            size=(H, W),
+            mode="bilinear",
+            align_corners=False
+        )
+
+    return logits  # keep on GPU
+
+
+def predict_with_batch_fusion(
+        image, 
+        model, 
+        img_path=None, 
+        batch_size=8,
+        tile_size=2048, 
+        stride=1024, 
+        th=0.5, 
+        do_keep_weights=True,
+        do_show=True, 
+        do_save=True, 
+        do_save_mask_as_img=True
+        ):
+    """
+    Perform sliding-window batched inference using the multi-scale fusion model.
+    Parameters:
+        image (str | PIL.Image) - input image path or PIL image.
+        model (torch.nn.Module) - trained fusion segmentation model.
+        img_path (str | None) - original image path used for saving outputs.
+        batch_size (int) - number of tiles processed simultaneously.
+        tile_size (int) - size of sliding-window tiles.
+        stride (int) - stride between tiles.
+        th (float) - probability threshold for generating binary predictions.
+        do_keep_weights (bool) - whether to keep fusion weights.
+        do_show (bool) - whether to display results.
+        do_save (bool) - whether to save prediction outputs.
+        do_save_mask_as_img (bool) - whether to save an RGB visualization mask.
+    Returns:
+        tuple - binary mask, RGB visualization, probability map, and fusion weights.
+    """
+
+    if not isinstance(image, Image.Image):
+        img_path = image
+        image = Image.open(image)
+    img_arr = np.array(image)[..., :3]
+
+    img_padded, _, _ = mirror_pad_image_fusion(img_arr, tile_size, stride)
+
+    H_original, W_original  = img_arr.shape[:2]
+    H, W = img_padded.shape[:2]
+    overlap = tile_size - stride
+
+    # prepare arrays
+    prob_acc = torch.zeros((H,W))
+    weight_acc = torch.zeros((H,W))
+    weights_fusion_acc = torch.zeros((4,H,W))
+
+    list_xpos = range(0, W - tile_size + 1, stride)
+    list_ypos = range(0, H - tile_size + 1, stride)
+    list_positions = list(product(list_xpos, list_ypos))
+
+    batch = torch.zeros((batch_size, tile_size, tile_size, 3), device=model.device) # B x K x W x H x 3
+    initial_poses = []
+
+    for id_sample, (x,y) in tqdm(enumerate(list_positions), total=len(list_positions), disable=True):
+        x0 = min(x, W - tile_size)
+        y0 = min(y, H - tile_size)
+        tile = img_padded[y0:y0 + tile_size, x0:x0 + tile_size, :]
+
+        batch[id_sample % batch_size, ...] = torch.tensor(tile)
+        initial_poses.append((x0, y0))
+
+        # Crop region (handles border tiles automatically)
+        if (id_sample > 0 and (id_sample + 1) % batch_size == 0) or id_sample == len(list_positions) - 1:
+
+            output, weights = predict_batch_array_fusion(
+                model, 
+                batch, 
+                do_keep_weights,
+                model.device
+                )
+            probs = torch.softmax(output.logits, dim=1)[:, ].detach().cpu()
+
+            for i in range(len(initial_poses)):
+                xi, yi = initial_poses[i]
+                
+
+                y2 = yi + int(overlap/2) if yi != 0 else 0
+                x2 = xi + int(overlap/2) if xi != 0 else 0
+                y3 = yi + tile_size - int(overlap/2) if yi + tile_size < H else yi + tile_size
+                x3 = xi + tile_size - int(overlap/2) if xi + tile_size < W else xi + tile_size
+
+                x0_log = int(overlap/2) if x2 != 0 else 0
+                y0_log = int(overlap/2) if y2 != 0 else 0
+                y1_log = tile_size - int(overlap/2) if yi + tile_size < H else tile_size
+                x1_log = tile_size - int(overlap/2) if xi + tile_size < W else tile_size
+
+                prob_acc[y2:y3, x2:x3] += probs[i, 1, ...].reshape((tile_size, tile_size))[y0_log:y1_log, x0_log:x1_log]
+                if do_keep_weights:
+                    weight_acc[y2:y3, x2:x3] += 1
+                    new_weights = weights[i,:,1,...].cpu() * np.ones([4,y1_log - y0_log, x1_log - x0_log])
+                    # weights_fusion_acc[:, y2:y3, x2:x3] += weights[i, :].reshape((4, tile_size, tile_size)).cpu()[:, y0_log:y1_log, x0_log:x1_log]
+                    weights_fusion_acc[:, y2:y3, x2:x3] += new_weights
+
+            initial_poses = []
+
+    final_prob = prob_acc[0:H_original, 0:W_original].cpu().numpy()
+    weights_fusion_acc = weights_fusion_acc.cpu().numpy()
+    final_labels = np.zeros(final_prob.shape, dtype=np.uint8)
+    final_labels[final_prob >= th] = 1
+
+    final_weights_fusion_acc = weights_fusion_acc[:, 0:H_original, 0:W_original] if do_keep_weights else None
+
+    src_dest_preds_mask = os.path.splitext(img_path)[0] + f'_preds_mask.tif'
+    src_dest_preds_img = os.path.splitext(img_path)[0] + f'_preds_img.tif'
+
+    rgb_labels = np.zeros((final_labels.shape[0], final_labels.shape[1], 3), dtype=np.uint8)
+    rgb_labels[final_labels == 1] = 255
+    if do_save:
+        os.makedirs(os.path.dirname(src_dest_preds_mask), exist_ok=True)
+        tiff.imwrite(src_dest_preds_mask, final_labels, compression="zstd", compressionargs={"level": 9})
+        if do_save_mask_as_img:
+            tiff.imwrite(src_dest_preds_img, rgb_labels, compression="zstd", compressionargs={"level": 9})
+    
+    if do_show:
+        plt.imshow(Image.fromarray(rgb_labels.astype(np.uint8), mode="RGB"))
+
+    return final_labels, rgb_labels, final_prob, final_weights_fusion_acc
+
+
+def predict_with_batch(image, model, img_path=None, batch_size=8, tile_size=512, stride=256, th=0.5, do_show=True, do_save=True, do_save_mask_as_img=True):
+    """
+    Perform sliding-window batched inference using a segmentation model.
+    Parameters:
+        image (str | PIL.Image) - input image path or PIL image.
+        model (torch.nn.Module) - trained segmentation model.
+        img_path (str | None) - original image path used for saving outputs.
+        batch_size (int) - number of tiles processed simultaneously.
+        tile_size (int) - size of sliding-window tiles.
+        stride (int) - stride between tiles.
+        th (float) - probability threshold for generating binary predictions.
+        do_show (bool) - whether to display results.
+        do_save (bool) - whether to save prediction outputs.
+        do_save_mask_as_img (bool) - whether to save an RGB visualization mask.
+    Returns:
+        tuple - binary prediction mask, RGB visualization mask, and probability map.
+    """
+    if not isinstance(image, Image.Image):
+        img_path = image
+        image = Image.open(image)
+    img_arr = np.array(image)[...,:3]
+
+    img_padded, _, _ = mirror_pad_image(img_arr, tile_size, stride)
+    H_original, W_original  = img_arr.shape[:2]
+    H, W = img_padded.shape[:2]
+    
+    # prepare arrays
+    prob_acc = torch.zeros((H,W), device=model.device)
+    weight_acc = torch.zeros((H,W), device=model.device)
+
+    list_xpos = range(0, W - tile_size + 1, stride)
+    list_ypos = range(0, H - tile_size + 1, stride)
+    list_positions = list(product(list_xpos, list_ypos))
+
+    batch = torch.zeros((batch_size, tile_size, tile_size, 3), device=model.device)
+    initial_poses = []
+
+    for id_sample, (x,y) in enumerate(list_positions):
+        x0 = min(x, W - tile_size)
+        y0 = min(y, H - tile_size)
+        tile = torch.tensor(img_padded[y0:y0 + tile_size, x0:x0 + tile_size, :])
+        batch[id_sample % batch_size, ...] = tile
+        initial_poses.append((x0, y0))
+
+        # Crop region (handles border tiles automatically)
+        if (id_sample > 0 and (id_sample + 1) % batch_size == 0) or id_sample == len(list_positions) - 1:
+            logits = predict_batch_array(model, batch, model.device)
+            probs = torch.softmax(logits, dim=1)[:, ]
+
+            for i in range(len(initial_poses)):
+                xi, yi = initial_poses[i]
+                prob_acc[yi:yi+tile_size, xi:xi+tile_size] += probs[i, 1, ...].reshape((tile_size, tile_size))
+                weight_acc[yi:yi+tile_size, xi:xi+tile_size] += 1
+
+            batch = torch.zeros((batch_size, tile_size, tile_size, 3), device=model.device)
+            initial_poses = []
+
+    final_prob = torch.divide(prob_acc, weight_acc)[0:H_original, 0:W_original].cpu().numpy()
+    
+    final_labels = np.zeros(final_prob.shape, dtype=np.uint8)
+    final_labels[final_prob >= th] = 1
+
+    src_dest_preds_mask = os.path.splitext(img_path)[0] + f'_preds_mask.tif'
+    src_dest_preds_img = os.path.splitext(img_path)[0] + f'_preds_img.tif'
+
+    rgb_labels = np.zeros((final_labels.shape[0], final_labels.shape[1], 3), dtype=np.uint8)
+    rgb_labels[final_labels == 1] = 255
+    if do_save:
+        os.makedirs(os.path.dirname(src_dest_preds_mask), exist_ok=True)
+        tiff.imwrite(src_dest_preds_mask, final_labels, compression="zstd", compressionargs={"level": 9})
+        if do_save_mask_as_img:
+            tiff.imwrite(src_dest_preds_img, rgb_labels, compression="zstd", compressionargs={"level": 9})
+    
+    if do_show:
+        plt.imshow(Image.fromarray(rgb_labels.astype(np.uint8), mode="RGB"))
+
+    return final_labels, rgb_labels, final_prob
+
+
+def produce_with_lower_res(src_img, src_dest, res_frac, do_save=True, do_show=True):
+    """
+    Generate a lower-resolution version of an image.
+    Parameters:
+        src_img (str) - path to the input image.
+        src_dest (str) - destination directory for the resized image.
+        res_frac (float) - resolution scaling factor.
+        do_save (bool) - whether to save the resized image.
+        do_show (bool) - whether to display the resized image.
+    Returns:
+        tuple - resized image and path to the saved image.
+    """
+    img = Image.open(src_img)
+    res_original = img.size
+    low_res = tuple([int(x * res_frac) for x in res_original])
+
+    img_low = img.resize((low_res), resample=Image.BILINEAR)
+    src_final = os.path.join(src_dest, os.path.splitext(os.path.basename(src_img))[0] + f'_res_{res_frac}.tif')
+    
+    
+    if do_save:
+        tiff.imwrite(src_final, img_low, compression="zstd", compressionargs={"level": 9})
+    if do_show:
+        plt.imshow(img_low)
+    
+    return img_low, src_final
+
+
+def prob_to_rgb(prob_map, cmap_name="viridis"):
+    """
+    Convert a probability map into an RGB visualization using a colormap.
+    Parameters:
+        prob_map (np.ndarray) - probability map with values in [0,1].
+        cmap_name (str) - matplotlib colormap name.
+    Returns:
+        np.ndarray - RGB image representing the probability map.
+    """
+    cmap = cm.get_cmap(cmap_name)
+
+    # Apply colormap → RGBA in [0,1]
+    rgba = cmap(prob_map)
+
+    # Drop alpha channel and convert to uint8
+    rgb = (rgba[..., :3] * 255).astype(np.uint8)
+
+    return rgb
+
+
+# ===========================================
+# ==== VECTORIZATION ========================
+# =========================================== 
+
+def geo_transfert(img_geo, img_target, same_file=True):
+    """
+    Transfer georeferencing metadata from a reference image to another raster.
+    Parameters:
+        img_geo (str) - source image containing georeferencing information.
+        img_target (str) - target raster file to update with georeferencing.
+        same_file (bool) - whether to overwrite the target file or create a new one.
+    Returns:
+        str - path to the georeferenced output raster.
+    """
+    with rasterio.open(img_geo) as src:
+        crs = src.crs
+        transform = src.transform
+    
+    # If no georeferencing, stop
+    if transform == rasterio.transform.IDENTITY:
+        return
+        
+    with rasterio.open(img_target) as pred:
+        pred_data = pred.read()
+        pred_profile = pred.profile
+        
+    pred_profile.update({
+        "crs": crs,
+        "transform": transform
+    })
+
+    src_new_target = os.path.splitext(img_target)[0] +"_georef.tif" if not same_file else img_target
+
+    with rasterio.open(src_new_target, "w", **pred_profile) as dst:
+        dst.write(pred_data)
+
+    return src_new_target
+

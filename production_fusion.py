@@ -1,0 +1,412 @@
+import os
+import shutil
+import json
+import argparse
+import numpy as np
+import geopandas as gpd
+from tqdm import tqdm
+from PIL import Image
+from sklearn.cluster import DBSCAN
+import rasterio
+from rasterio.features import shapes
+from shapely.geometry import shape
+from omegaconf import OmegaConf
+from time import time
+import torch
+import tifffile as tiff
+
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+from utils.production_utils import download_tile, produce_with_lower_res, predict_with_batch_fusion, geo_transfert, load_latest_checkpoint
+from utils.trainer import MultiScaleFusionModel
+
+from transformers import SegformerForSemanticSegmentation
+
+# Clearing warnings
+Image.MAX_IMAGE_PIXELS = None
+import warnings
+from rasterio.errors import NotGeoreferencedWarning
+
+warnings.filterwarnings(
+    "ignore",
+    category=NotGeoreferencedWarning
+)
+
+
+def tiles_downloading(
+        dest_tiles, 
+        downloading_mode, 
+        canton=None,
+        area=None,
+        year=None,
+        dest_not_empty='add'
+        ):
+    """
+    Download SwissImage tiles from Swisstopo based on a selected geographic mode.
+    Parameters: 
+        dest_tiles (str) - destination directory for downloaded tiles; 
+        downloading_mode (str) - selection mode ("canton", "area", "year", "full"); 
+        canton (str) - canton name when using canton mode; 
+        area (object) - area definition with Emin/Emax/Nmin/Nmax when using area mode; 
+        year (int) - acquisition year when using year mode; 
+        dest_not_empty (str) - behavior if destination contains files ("add", "replace", "stop").
+    Returns: 
+        list[str] - list of file paths to downloaded tiles.
+    """
+
+    tiles_to_download = []
+    lst_tiles_src = []
+    os.makedirs(dest_tiles, exist_ok=True)
+    if len(os.listdir(dest_tiles)) > 0:
+        if dest_not_empty == 'replace':
+            shutil.rmtree(dest_tiles)
+            os.makedirs(dest_tiles, exist_ok=True)
+        elif dest_not_empty == 'stop':
+            raise PermissionError('The destination already contains files. Empty it or change parameter "dest_not_empty"')
+        
+    # find tiles to download
+    tiles_locs = gpd.read_file("utils/resources/tiles_locs/ch.swisstopo.images-swissimage-dop10.metadata.shp")
+    if downloading_mode == 'year':
+        tiles_locs = tiles_locs.loc[tiles_locs.datenstand == str(year)]
+    ids = tiles_locs.id.values
+    E = [x.split('_')[0] for x in ids]
+    N = [x.split('_')[1] for x in ids]
+    EN = [[int(x), int(y)] for x,y in zip(E,N)]
+
+    if downloading_mode in ['canton', 'area']:
+
+        # find area of interest
+        (Emin, Emax, Nmin, Nmax) = (0,0,0,0)
+        if downloading_mode == 'canton':
+            cantons = gpd.read_file('utils/resources/swissboundaries/swissBOUNDARIES3D_1_5_TLM_KANTONSGEBIET.shp')
+            if canton not in cantons.NAME.values:
+                raise AttributeError(f"The given canton's name is not correct. Please choos between the following: \n {cantons.NAME.values}")
+            
+            canton_polygons = cantons[cantons.NAME == canton]
+            Emin = int(canton_polygons.bounds.minx.values[0] // 1000)
+            Emax = int((canton_polygons.bounds.maxx.values[0] + 1) // 1000)
+            Nmin = int(canton_polygons.bounds.miny.values[0] // 1000)
+            Nmax = int((canton_polygons.bounds.maxy.values[0] + 1) // 1000)
+        elif downloading_mode == 'area':
+            Emin = int(area.Emin)
+            Emax = int(area.Emax)
+            Nmin = int(area.Nmin)
+            Nmax = int(area.Nmax)
+
+        tiles_to_download = [x for x in EN if Emin <= x[0] <= Emax and Nmin <= x[1] <= Nmax]
+
+        # Gives information about tiles to be downloaded
+        text = f"""
+    ({Emin},{Nmax+1}) --- ({Emax+1},{Nmax+1})
+        |               |
+        |               |
+        |               |
+    ({Emin},{Nmin}) --- ({Emax+1},{Nmin})
+    """
+        if downloading_mode == 'canton':
+            print(f"Processing canton {canton} with following area ({len(tiles_to_download)} tiles):")
+        else:
+            print(f"Processing following area ({len(tiles_to_download)} tiles):")
+        print(text)
+    elif downloading_mode in ['year', 'full']:
+        
+        tiles_to_download = EN
+
+        # Gives information about tiles to be downloaded
+        if downloading_mode == 'year':
+            print(f"Processing data of the year {year} ({len(tiles_to_download)} tiles):")
+        else:
+            print(f"Processing all of Switzerland ({len(tiles_to_download)})")
+    else:
+        raise AttributeError("downloader.mode is not a valid value!")
+        
+    # download tiles
+    for _, tile in tqdm(enumerate(tiles_to_download), total=len(tiles_to_download), desc="Downloading"):
+        tile_src = download_tile(tile[0], tile[1], dest_tiles)
+        if tile_src != None:
+            lst_tiles_src.append(tile_src)
+
+    return lst_tiles_src
+
+
+def clustering(img_arr, src_dest, eps, min_samples, min_cluster_size,  color_palette, do_save_img=True):
+    """
+    Perform DBSCAN clustering on a binary landslide mask and optionally generate a colored cluster visualization.
+    Parameters: 
+        img_arr (np.ndarray) - binary mask of predicted landslide pixels; 
+        src_dest (str) - base path for saving cluster outputs; 
+        eps (float) - DBSCAN neighborhood radius; min_samples (int) - minimum points to form a cluster; 
+        min_cluster_size (int) - minimum number of pixels required to keep a cluster; 
+        color_palette (list) - RGB color palette used to visualize clusters; 
+        do_save_img (bool) - whether to generate a colored cluster image.
+    Returns: 
+        tuple[str, str] - paths to the saved cluster mask and cluster visualization image.
+    """
+    # extract coordinates of landslides
+    pos_ls = np.argwhere(img_arr)
+
+    mask_clusters = np.zeros(img_arr.shape)
+    rgb_clusters = np.zeros((mask_clusters.shape[0], mask_clusters.shape[1], 4))
+
+    if len(pos_ls) > 0:
+        # create cluster map
+        clustering = DBSCAN(eps=eps, min_samples=min_samples, n_jobs=2).fit(pos_ls)
+
+        # unpack coordinates
+        rows = pos_ls[:, 0]
+        cols = pos_ls[:, 1]
+
+        # remove noise
+        labels = clustering.labels_
+        valid = labels != -1
+        rows = rows[valid]
+        cols = cols[valid]
+        labels = labels[valid]
+        labels[labels == 0] = np.max(labels) + 1
+
+        # count cluster sizes (FAST)
+        unique, counts = np.unique(labels, return_counts=True)
+
+        # find clusters to keep
+        keep_clusters = unique[counts >= min_cluster_size]
+
+        # mask of points to keep
+        keep_mask = np.isin(labels, keep_clusters)
+
+        # now write ONLY good points to image
+        mask_clusters[rows[keep_mask], cols[keep_mask]] = labels[keep_mask]
+
+        # saving image version
+        if do_save_img:
+            lst_clusters = set(keep_clusters)
+            distinct_colors_rgb8 = [(x, y, z, 255) for [x,y,z] in color_palette]
+
+            for cluster in lst_clusters:
+                id_color = cluster % len(distinct_colors_rgb8)
+                rgb_clusters[mask_clusters == cluster] = distinct_colors_rgb8[id_color]
+
+
+    # save results
+    src_mask = os.path.splitext(src_dest)[0] + f'_clusters_eps_{eps}_min_samp_{min_samples}_mask.tif'
+    src_img = os.path.splitext(src_dest)[0] + f'_clusters_eps_{eps}_min_samp_{min_samples}_img.tif'
+
+    if do_save_img:
+        tiff.imwrite(src_img, rgb_clusters.astype(np.uint8), compression="zstd", compressionargs={"level": 9})
+
+    tiff.imwrite(src_mask, mask_clusters.astype(np.uint16), compression="zstd", compressionargs={"level": 9})
+
+    return src_mask, src_img
+
+
+def vectorize(src_target, src_dest):
+    """
+    Convert a raster cluster mask into vector polygons and save them as a GeoPackage.
+    Parameters: 
+        src_target (str) - path to the raster mask containing cluster labels; 
+        src_dest (str) - directory where the vector file will be saved.
+    Returns: 
+        str | None - path to the generated GeoPackage or None if no cluster exists.
+    """
+
+    with rasterio.open(src_target) as src:
+        mask = src.read(1)
+        if np.sum(mask) == 0:
+            return
+        transform = src.transform
+        crs = src.crs
+
+        # Extract polygons AND their raster values
+        records = [
+            {"geometry": shape(geom), "raster_val": value}
+            for geom, value in shapes(mask, transform=transform)
+            if value != 0 # optional: ignore background
+        ]
+
+    # Build georeferenced GeoDataFrame
+    gdf = gpd.GeoDataFrame(records, crs=crs)
+
+    # Save to GeoPackage
+    src_polygons = os.path.join(src_dest, os.path.splitext(os.path.basename(src_target))[0] + '_landslides.gpkg')
+    gdf.to_file(src_polygons, driver="GPKG")
+    
+    return src_polygons
+
+
+def production(args):
+    """
+    Run the full production pipeline including tile downloading, model inference, clustering, and vectorization.
+    Parameters: 
+        args (OmegaConf / argparse namespace) - configuration containing downloader, prediction, and vectorization parameters.
+    Returns: 
+        None - processes tiles and writes prediction, clustering, and vector outputs to disk.
+    """
+
+    start_time = time()
+
+    # Load parameters
+    DEST_ORIGINAL_TILES = args.downloader.destination
+    DEST_NOT_EMPTY = args.downloader.dest_not_empty
+    SKIP_AUTO_DOWNLOADING = args.downloader.skip_auto_downloading
+    DOWNLOADING_MODE = args.downloader.mode
+    CANTON = args.downloader.canton
+    AREA = args.downloader.area
+    YEAR = args.downloader.year
+    DEST_PREDS = args.predictions.destination
+    MODEL_SEG_DIR = args.predictions.model_seg_dir
+    MODEL_FUS_DIR = args.predictions.model_fus_dir
+    BATCH_SIZE = args.predictions.batch_size
+    THRESHOLD_PREDS = args.predictions.threshold_preds
+    TILE_SIZE = args.predictions.tile_size
+    OVERLAP = args.predictions.overlap
+    STRIDE = TILE_SIZE - OVERLAP
+    SCALES = args.predictions.scales
+    KEEP_MASK_BIN = args.to_keep.mask_bin
+    KEEP_MASK_IMG = args.to_keep.mask_img
+    KEEP_PROBAS = args.to_keep.probas
+    KEEP_WEIGHTS = args.to_keep.weights
+    KEEP_CLUSTER_BIN = args.to_keep.cluster_bin
+    KEEP_CLUSTER_IMG = args.to_keep.cluster_img
+
+    DEST_PREDS = DEST_ORIGINAL_TILES if DEST_PREDS.lower() == 'default' else DEST_PREDS
+    dest_preds_dir = os.path.join(DEST_PREDS, 'predictions')
+    dest_probas_dir = os.path.join(DEST_PREDS, 'probas')
+    dest_clusters_dir = os.path.join(DEST_PREDS, 'clusters')
+    dest_vectors_dir = os.path.join(DEST_PREDS, 'vectors')
+    dest_originals_dir = os.path.join(DEST_PREDS, 'originals')
+    dest_weights_dir = os.path.join(DEST_PREDS, 'weights')
+
+    # === TILES DOWNLOADING ===
+    # =========================
+    os.makedirs(DEST_ORIGINAL_TILES, exist_ok=True)
+    if not SKIP_AUTO_DOWNLOADING:
+        lst_tiles_src = tiles_downloading(
+            dest_tiles=dest_originals_dir,
+            downloading_mode=DOWNLOADING_MODE,
+            canton=CANTON,
+            area=AREA,
+            year=YEAR,
+            dest_not_empty=DEST_NOT_EMPTY
+        )
+    else:
+        img_exts = ['.jpg', '.jpeg', '.png', '.tif', '.tiff', '.bmp']
+        lst_tiles_src = [os.path.join(DEST_ORIGINAL_TILES, x) for x in os.listdir(DEST_ORIGINAL_TILES) if os.path.splitext(x)[1].lower() in img_exts]
+
+    if len(lst_tiles_src) == 0:
+        print("NO TILE TO PROCESS!")
+        return
+
+    os.makedirs(dest_preds_dir, exist_ok=True)
+    os.makedirs(dest_probas_dir, exist_ok=True)
+    os.makedirs(dest_clusters_dir, exist_ok=True)
+    os.makedirs(dest_vectors_dir, exist_ok=True)
+    os.makedirs(dest_weights_dir, exist_ok=True)
+
+    # load model
+    DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+    model  = MultiScaleFusionModel.from_pretrained(
+        segformer_model_name_or_path=load_latest_checkpoint(MODEL_SEG_DIR),
+        scales=SCALES,
+        fusion_checkpoint=load_latest_checkpoint(MODEL_FUS_DIR),
+        num_labels=2,
+        device=DEVICE,
+        )
+    model = model.to(DEVICE)
+    model.eval()
+
+    for _, src_img in tqdm(enumerate(lst_tiles_src), total=len(lst_tiles_src), desc="Processing tiles"):
+
+        # === PREDICTIONS =====
+        # =====================
+        pred_mask, preds_img, proba_img, weights_fusion = predict_with_batch_fusion(
+            image=src_img, 
+            model=model, 
+            batch_size=BATCH_SIZE,
+            tile_size=TILE_SIZE,
+            stride=STRIDE,
+            th=THRESHOLD_PREDS, 
+            do_keep_weights=KEEP_WEIGHTS,
+            do_show=False,
+            do_save=False,
+            do_save_mask_as_img=False,
+            )
+        
+        src_preds_mask = os.path.join(dest_preds_dir, os.path.splitext(os.path.basename(src_img))[0] + f'_mask.tif')
+        src_preds_img = os.path.join(dest_preds_dir, os.path.splitext(os.path.basename(src_img))[0] + f'_img.tif')
+        src_probas_mask = os.path.join(dest_probas_dir, os.path.splitext(os.path.basename(src_img))[0] + f'_probas.tif')
+
+        if KEEP_WEIGHTS:
+            for i_weight in range(weights_fusion.shape[0]):
+                src_weights_mask_f = os.path.join(dest_weights_dir, os.path.splitext(os.path.basename(src_img))[0] + f'_weights_scale_{SCALES[i_weight]}_int.tif')
+                src_weights_mask_int = os.path.join(dest_weights_dir, os.path.splitext(os.path.basename(src_img))[0] + f'_weights_scale_{SCALES[i_weight]}_float.tif')
+                tiff.imwrite(src_weights_mask_f, (np.clip(weights_fusion[i_weight,...], 0, 1) * 255).astype(np.uint8), compression="zstd", compressionargs={"level": 9})
+                tiff.imwrite(src_weights_mask_int, weights_fusion[i_weight,...], compression="zstd", compressionargs={"level": 9})
+                geo_transfert(src_img, src_weights_mask_f)
+                geo_transfert(src_img, src_weights_mask_int)
+
+        if KEEP_MASK_BIN:
+            tiff.imwrite(src_preds_mask, pred_mask.astype(np.uint8), compression="zstd", compressionargs={"level": 9})
+            geo_transfert(src_img, src_preds_mask, True)
+        if KEEP_MASK_IMG:
+            tiff.imwrite(src_preds_img, preds_img.astype(np.uint8), compression="zstd", compressionargs={"level": 9})
+            geo_transfert(src_img, src_preds_img, True)
+
+        # creation of final probas
+        if KEEP_PROBAS:
+            proba_img = (np.clip(proba_img, 0, 1) * 255).astype(np.uint8)
+
+            tiff.imwrite(src_probas_mask, proba_img, compression="zstd", compressionargs={"level": 9})
+            geo_transfert(src_img, src_probas_mask, True)
+
+        # === VECTORIZATION ===
+        # =====================
+        EPS = args.vectorization.dbscan_eps
+        MIN_SAMPLES = args.vectorization.dbscan_min_samples
+        MIN_CLUSTER_SIZE = args.vectorization.min_cluster_size
+        SRC_COLOR_PALETTE = args.vectorization.src_color_palette
+        with open(SRC_COLOR_PALETTE, 'r') as f:
+            color_palette = json.load(f)
+
+        src_clusters_mask, src_clusters_img = clustering(
+            img_arr=pred_mask,
+            src_dest=os.path.join(dest_clusters_dir, os.path.basename(src_img)),
+            eps= EPS, 
+            min_samples=MIN_SAMPLES, 
+            min_cluster_size=MIN_CLUSTER_SIZE,
+            color_palette=color_palette,
+            do_save_img=KEEP_CLUSTER_IMG,
+            )
+
+        geo_transfert(src_img, src_clusters_mask, True)
+
+        if KEEP_CLUSTER_IMG:
+            geo_transfert(src_img, src_clusters_img, True)
+
+        # vectorize if any cluster found
+        vectorize(src_clusters_mask, dest_vectors_dir)
+
+        if not KEEP_CLUSTER_BIN:
+            os.remove(src_clusters_mask)
+
+    # Show duration of process
+    delta_time_loop = time() - start_time
+    hours = int(delta_time_loop // 3600)
+    min = int((delta_time_loop - 3600 * hours) // 60)
+    sec = int(delta_time_loop - 3600 * hours - 60 * min)
+    print(f"\n==== FINISH! {len(lst_tiles_src)} tiles processed in {hours}:{min}:{sec} ====\n")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", default="")
+    args = parser.parse_args()
+    cfg_path = args.config
+
+    if cfg_path != "":
+        print("- Producing from argument - ")
+        args = OmegaConf.load(cfg_path)
+    else:
+        print("- Producing from yaml file - ")
+        args = OmegaConf.load('config/production.yaml')
+
+    production(args)

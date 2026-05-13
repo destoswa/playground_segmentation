@@ -1,0 +1,23 @@
+--extra-index-url https://download.pytorch.org/whl/cu126
+torch
+torchvision
+torchaudio
+transformers
+accelerate
+datasets
+pandas
+tqdm
+scikit-learn
+opencv-python
+matplotlib
+seaborn
+Pillow
+geopandas
+albumentations
+yacs
+pyyaml
+einops
+omegaconf
+tifffile
+imagecodecs
+rasterio

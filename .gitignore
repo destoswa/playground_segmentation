@@ -1,0 +1,9 @@
+.venv/
+.venv_old/
+.vscode/
+data/
+notebooks/data_for_testing/
+outputs/
+results/
+*.pyc
+__pycache__/
