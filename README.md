@@ -11,7 +11,7 @@ to install this pipeline, you need to have CUDA installed on your machine and fo
     ```
     git clone --depth=1 https://github.com/destoswa/playground_segmentation
     ```
-
+  
 2) Create a virtual environment
     ```
     cd playground_segmentation
@@ -32,7 +32,7 @@ This versatility allows then, in the Inference phase (production.py), to assess 
 ## Model
 The model used is called SegFormer.
 ...
-
+![segformer architecture](medias/segformer_architecture.png)
 ## Production (Inference)
 A pretrained model is already present in the repo under `model/segmenter_playground`.
 In order to make predictions on new tiles, open the file `production.yaml` and precise the following:
@@ -48,6 +48,7 @@ A few important parameters:
 ...
 ### Preprocessing
 ...
+![preprocessing schema](medias/preprocessing.png)
 ### Finetuning
 ...
 
