@@ -89,7 +89,7 @@ def mirror_pad_image(img, tile_size, stride):
     return padded, (pad_h, pad_w), (H, W)
 
 
-def load_latest_checkpoint(model_dir, verbose=False):
+def load_best_checkpoint(model_dir, verbose=False):
     """
     Retrieve the latest checkpoint directory inside a model directory.
     Parameters:
@@ -101,21 +101,21 @@ def load_latest_checkpoint(model_dir, verbose=False):
     if not os.path.isdir(model_dir):
         raise ValueError(f"Model directory not found: {model_dir}")
 
-    ckpts = [d for d in os.listdir(model_dir) if d.startswith("checkpoint-")]
-    if not ckpts and verbose:
-        print("[INFO] No checkpoints found. Using main model directory.")
-        return model_dir
+    # ckpts = [d for d in os.listdir(model_dir) if d.startswith("checkpoint-")]
+    # if not ckpts and verbose:
+    #     print("[INFO] No checkpoints found. Using main model directory.")
+    #     return model_dir
 
-    # Sort by step number
-    ckpts_sorted = sorted(ckpts, key=lambda x: int(x.split("-")[1]))
-    last_ckpt = ckpts_sorted[-1]
+    # # Sort by step number
+    # ckpts_sorted = sorted(ckpts, key=lambda x: int(x.split("-")[1]))
+    # last_ckpt = ckpts_sorted[-1]
     with open(os.path.join(model_dir, 'last_checkpoint/trainer_state.json'), "r") as jsonfile: 
         infos = json.load(jsonfile)
     best_model = infos['best_model_checkpoint']
     if verbose:
         print(f"[INFO] Using checkpoint: {best_model}")
     return best_model
-    return os.path.join(model_dir, last_ckpt)
+    # return os.path.join(model_dir, last_ckpt)
 
 
 def gaussian_weight(size, sigma=0.125):

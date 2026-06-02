@@ -1,44 +1,33 @@
+data:
+  source: data/Dompierr # path of the folder with the images to process
+  results: default  # where to place the results. If Default, predict next to source
 downloader:
-  # destination: data/tests_fusion_production/test_50_playground_mean_no_label_smoothing
-  destination: data/production/Dompierre/selection_th_0.25
-  dest_not_empty: replace # choose between 'add', 'stop', 'replace'
   skip_auto_downloading: True
-  mode: year  # can be chosen between 'full', 'region', 'area' and 'year'
-  canton: "Genève"  # which canton is chosen if the mode is 'canton'
-  # canton need to be chosen between:
-  #   ['Genève' 'Thurgau' 'Valais' 'Aargau' 'Schwyz' 'Zürich' 'Obwalden'
-  #  'Fribourg' 'Glarus' 'Uri' 'Nidwalden' 'Solothurn'
-  #  'Appenzell Ausserrhoden' 'Jura' 'Graubünden' 'Vaud' 'Luzern' 'Ticino'
-  #  'Zug' 'Basel-Landschaft' 'St. Gallen' 'Schaffhausen' 'Bern' 'Basel-Stadt'
-  #  'Neuchâtel' 'Appenzell Innerrhoden']
+  dest_not_empty: replace # What to do if there is already tiles in the source folder. Choose between 'add', 'stop', 'replace'
+  mode: year  # choose between 'full', 'region', 'area' and 'year'
+  canton: "Genève"  # which canton is chosen if the mode is 'canton'. Need to be chosen between: "Aargau", "Appenzell Ausserrhoden", "Appenzell Innerrhoden", "Basel-Landschaft", "Basel-Stadt", "Bern", "Fribourg", "Genève", "Glarus", "Graubünden", "Jura", "Luzern", "Neuchâtel", "Nidwalden", "Obwalden", "Schaffhausen", "Schwyz", "Solothurn", "St. Gallen", "Thurgau", "Ticino", "Uri", "Valais", "Vaud", "Zug", "Zürich"
   area: # which delimitation if the mode is 'area'
     Emin: 2580
     Emax: 2589  
     Nmin: 1160
     Nmax: 1169
-  year: 2025  # which year if the mode is 'year'
+  year: 2025  # which year if the mode is 'year'. ALL tiles of the year will be downloaded
 predictions:
-  destination: default  # if Default, predict next to original
-  model_dir: results/training/20260330_161209_segmenter_50_epochs_playground_no_lbl_smoothing
-  model_seg_dir: results/training/20260312_165923_segmenter_50_epochs_test_fusion_global
-  model_fus_dir: results\training\20260317_084050_fusion_30_epochs_test_fusion_global
-  batch_size: 4
-  threshold_preds: 0.25
-  threshold_grouping: 0.5
-  tile_size: 512
-  overlap: 256
-  scales: [1.0, 0.75, 0.5, 0.25]
-  # scales: [0.25]
+  model_dir: models/segmenter_playground
+  batch_size: 4 # number of images loaded at once in the VRAM
+  threshold_preds: 0.25 # threshold on probas above which the pixel is classified as playground.
+  tile_size: 512  # need to be adequate with the structure of the model (do not touch!)
+  overlap: 256  # how much overlap is used between two images analyzed by the sliding window
+  scales: [1.0, 0.75, 0.5, 0.25]  # list of scales used. bigger scales = more details, smaller scales = more context
 vectorization:
-  dbscan_eps: 3
-  dbscan_min_samples: 20
-  min_cluster_size: 100
+  dbscan_eps: 3 # The maximum distance (in pixels) between two samples for one to be considered as in the neighborhood of the other.
+  dbscan_min_samples: 20  # The number of samples (or total weight) in a neighborhood for a point to be considered as a core point.
+  min_cluster_size: 100 # clusters with smaller number of pixels will be dropped
   src_color_palette: utils/resources/color_palet.json
 to_keep:
-  intermed: True
-  mask_bin: True
-  mask_img: True
-  probas: True
-  weights: False
-  cluster_bin: True
-  cluster_img: False
+  intermed: True      # keep predictions at different resolution
+  mask_bin: True      # keep mask as a monolayer in {0,1}
+  mask_img: True      # keep mask as rgb
+  probas: True        # keep probas (monolayer in [0, 1])
+  cluster_mono: True  # keep clusters as a monolayer in {0, 1, 2, ...}
+  cluster_img: False  # keep clusters as rgb

@@ -19,10 +19,9 @@ import tifffile as tiff
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-from utils.production_utils import download_tile, produce_with_lower_res, predict_with_batch, geo_transfert, load_latest_checkpoint
+from utils.production_utils import download_tile, produce_with_lower_res, predict_with_batch, geo_transfert, load_best_checkpoint
 
 from transformers import SegformerForSemanticSegmentation
-from utils.trainer import MultiScaleFusionModel
 
 # Clearing warnings
 Image.MAX_IMAGE_PIXELS = None
@@ -128,9 +127,7 @@ def prediction(
         batch_size=8,
         tile_size=512, 
         stride=256, 
-        threshold_proba= 0.5, 
-        threshold_grouping=0.5,
-        do_save_inter=True,
+        threshold_proba= 0.5,
         do_save_mask=True,
         do_save_img=True,
         do_save_probas=True,
@@ -143,8 +140,7 @@ def prediction(
     probas = []
 
     # load model
-    ckpt_path = load_latest_checkpoint(model_dir)
-    # model = MultiScaleFusionModel.from_pretrained(ckpt_path)
+    ckpt_path = load_best_checkpoint(model_dir)
     model = SegformerForSemanticSegmentation.from_pretrained(ckpt_path)
     DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
     model.to(DEVICE)
@@ -191,27 +187,9 @@ def prediction(
     final_product[final_probas >= threshold_proba] = 1
     final_probas = (final_probas * 255).astype(np.uint8)
 
-
-
-    # #   _creation of final preds
-    # final_product = np.zeros((H, W), dtype=np.float32)
-    # for res, mask in masks.items():
-    #     rescaled_mask = Image.fromarray(mask).resize((W, H), Image.NEAREST)
-    #     final_product += rescaled_mask
-
-    #     if do_save_inter:
-    #         src_dest_preds_mask = os.path.join(src_inter, os.path.splitext(os.path.basename(src_img))[0] + f'_res_{res}_preds_mask.tif')
-    #         tiff.imwrite(src_dest_preds_mask, rescaled_mask, compression="zstd", compressionargs={"level": 9})
-
-    # final_product /= len(masks)
-    # final_product[final_product >= threshold_grouping] = 1
-    # final_product[final_product < threshold_grouping] = 0
-    # final_product = final_product.astype(np.uint8)
-
+    #   _creation of final preds
     final_product_rgb = np.zeros((W, H, 3))
     final_product_rgb[final_product == 1] = 255
-
-
 
     src_final_preds_mask = os.path.join(src_dest_preds, os.path.splitext(os.path.basename(src_img))[0] + f'_mask.tif')
     src_final_preds_img = os.path.join(src_dest_preds, os.path.splitext(os.path.basename(src_img))[0] + f'_img.tif')
@@ -221,27 +199,13 @@ def prediction(
         tiff.imwrite(src_final_preds_mask, final_product.astype(np.uint8), compression="zstd", compressionargs={"level": 9})
     if do_save_img:
         tiff.imwrite(src_final_preds_img, final_product_rgb.astype(np.uint8), compression="zstd", compressionargs={"level": 9})
-
-
     if do_save_probas:
-        # #   _creation of final probas
-        # final_probas = np.zeros((W,H), dtype=np.float32)
-
-        # for proba in probas:
-        #     rescaled_proba = Image.fromarray(proba).resize((W, H), Image.NEAREST)
-        #     final_probas += rescaled_proba
-
-        # final_probas /= len(probas)
-
-        # final_probas = np.clip(final_probas, 0, 1)
-        # final_probas = (final_probas * 255).astype(np.uint8)
-
         tiff.imwrite(src_final_probas_mask, final_probas, compression="zstd", compressionargs={"level": 9})
 
     return final_product, src_final_preds_mask, src_final_preds_img, src_final_probas_mask#, src_final_probas_img
 
 
-def clustering(img_arr, src_dest, eps, min_samples, min_cluster_size,  color_palette, do_save_img=True):
+def clustering(img_arr, src_dest, eps, min_samples, min_cluster_size,  color_palette, do_save_img=True, do_save_mono=True):
     # extract coordinates of landslides
     pos_ls = np.argwhere(img_arr)
 
@@ -285,13 +249,14 @@ def clustering(img_arr, src_dest, eps, min_samples, min_cluster_size,  color_pal
                 id_color = cluster % len(distinct_colors_rgb8)
                 rgb_clusters[mask_clusters == cluster] = distinct_colors_rgb8[id_color]
 
-
     # save results
     src_mask = os.path.splitext(src_dest)[0] + f'_clusters_eps_{eps}_min_samp_{min_samples}_mask.tif'
     src_img = os.path.splitext(src_dest)[0] + f'_clusters_eps_{eps}_min_samp_{min_samples}_img.tif'
 
     if do_save_img:
         tiff.imwrite(src_img, rgb_clusters.astype(np.uint8), compression="zstd", compressionargs={"level": 9})
+    if do_save_mono:
+        tiff.imwrite(src_mask, mask_clusters.astype(np.uint16), compression="zstd", compressionargs={"level": 9})
 
     tiff.imwrite(src_mask, mask_clusters.astype(np.uint16), compression="zstd", compressionargs={"level": 9})
 
@@ -330,20 +295,18 @@ def production(args):
     start_time = time()
 
     # Load parameters
-    DEST_ORIGINAL_TILES = args.downloader.destination
+    DEST_ORIGINAL_TILES = args.data.source
     DEST_NOT_EMPTY = args.downloader.dest_not_empty
     SKIP_AUTO_DOWNLOADING = args.downloader.skip_auto_downloading
     DOWNLOADING_MODE = args.downloader.mode
     CANTON = args.downloader.canton
     AREA = args.downloader.area
     YEAR = args.downloader.year
-    DEST_PREDS = args.predictions.destination
-    # MODEL_SEG_DIR = args.predictions.model_seg_dir
-    # MODEL_FUSION_DIR = args.predictions.model_fusion_dir
+    DEST_PREDS = args.data.results
     MODEL_DIR = args.predictions.model_dir
     BATCH_SIZE = args.predictions.batch_size
     THRESHOLD_PREDS = args.predictions.threshold_preds
-    THRESHOLD_GROUPING = args.predictions.threshold_grouping
+    # THRESHOLD_GROUPING = args.predictions.threshold_grouping
     TILE_SIZE = args.predictions.tile_size
     OVERLAP = args.predictions.overlap
     STRIDE = TILE_SIZE - OVERLAP
@@ -352,7 +315,7 @@ def production(args):
     KEEP_MASK_BIN = args.to_keep.mask_bin
     KEEP_MASK_IMG = args.to_keep.mask_img
     KEEP_PROBAS = args.to_keep.probas
-    KEEP_CLUSTER_BIN = args.to_keep.cluster_bin
+    KEEP_CLUSTER_MONO = args.to_keep.cluster_mono
     KEEP_CLUSTER_IMG = args.to_keep.cluster_img
 
     DEST_PREDS = DEST_ORIGINAL_TILES if DEST_PREDS.lower() == 'default' else DEST_PREDS
@@ -405,14 +368,11 @@ def production(args):
             tile_size=TILE_SIZE,
             stride=STRIDE,
             threshold_proba=THRESHOLD_PREDS, 
-            threshold_grouping=THRESHOLD_GROUPING,
             do_save_mask=KEEP_MASK_BIN,
             do_save_img=KEEP_MASK_IMG,
             do_save_inter=KEEP_INTERMED_FILES,
             do_save_probas=KEEP_PROBAS,
             )
-        # print("TIME TO PREDICT: ", time() - time_start)
-        # time_start = time()
 
         # === VECTORIZATION ===
         # =====================
@@ -431,6 +391,7 @@ def production(args):
             min_cluster_size=MIN_CLUSTER_SIZE,
             color_palette=color_palette,
             do_save_img=KEEP_CLUSTER_IMG,
+            do_save_mono=KEEP_CLUSTER_MONO,
             )
 
         # georeference files
@@ -440,7 +401,7 @@ def production(args):
             geo_transfert(src_img, src_pred_img, True)
         if KEEP_PROBAS:
             geo_transfert(src_img, src_proba_mask, True)
-        if KEEP_CLUSTER_BIN:
+        if KEEP_CLUSTER_MONO:
             geo_transfert(src_img, src_clusters_mask, True)
         if KEEP_CLUSTER_IMG:
             geo_transfert(src_img, src_clusters_img, True)
@@ -453,7 +414,7 @@ def production(args):
         # vectorize if any cluster found
         vectorize(src_clusters_mask, dest_vectors_dir)
 
-        if not KEEP_CLUSTER_BIN:
+        if not KEEP_CLUSTER_MONO:
             os.remove(src_clusters_mask)
         # if not KEEP_MASK_BIN:
         #     os.remove(src_pred_mask)
@@ -472,24 +433,6 @@ def production(args):
 
 
 if __name__ == "__main__":
-    # src_mask = r"D:\GitHubProjects\Terranum_repo\LandSlides\segformerlandslides\notebooks\data_for_testing\images\manual_analysis\temp2\gt\image_relation_18965086.tif"
-    # pred_mask_arr = rasterio.open(src_mask).read()[0,...]
-    # pred_mask_arr[pred_mask_arr != 0] = 1
-    # # pred_mask_arr = pred_mask_arr.squeeze(0)
-    # with open("utils/resources/color_palet.json", 'r') as f:
-    #         color_palette = json.load(f)
-    # src_clusters_mask, src_clusters_img = clustering(
-    #         img_arr=pred_mask_arr,
-    #         src_dest=os.path.basename(src_mask),
-    #         eps= 3, 
-    #         min_samples=20, 
-    #         min_cluster_size=100,
-    #         color_palette=color_palette,
-    #         do_save_img=True,
-    #         )
-    # vectorize(src_clusters_mask, os.path.dirname(src_mask))
-
-    # quit()
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="")
     args = parser.parse_args()
@@ -503,4 +446,3 @@ if __name__ == "__main__":
         args = OmegaConf.load('config/production.yaml')
 
     production(args)
-
