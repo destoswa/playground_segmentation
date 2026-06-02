@@ -1,0 +1,56 @@
+# TODO BEFORE THE END
+- change path to repo when migrated to terranum
+
+
+# Playground segmentation
+
+## How to install
+to install this pipeline, you need to have CUDA installed on your machine and follow these steps:
+1) Clone the repo on local\
+  Open a terminal, cd your way to the desired location and type:
+    ```
+    git clone --depth=1 https://github.com/destoswa/playground_segmentation
+    ```
+
+2) Create a virtual environment
+    ```
+    cd playground_segmentation
+    python -m venv .venv
+    ```
+4) Install the libaries
+    ```
+    pip install -r requirements.txt
+    ```
+
+## Introduction
+This repo contains a pipeline made to practice binary semantic segmentation. The pretrained model has been finetuned to discriminate playgrounds from background in aerial images with original resolution of 10cm/pixel.
+
+However, those images were alternated to obtaine version with greater context and lower resolution (resolution lowered down to a factor 0.25), allowing the model to be more versatile.
+
+This versatility allows then, in the Inference phase (production.py), to assess the samples under multiple resolutions. By doing that and regrouping the different predictions together, it allows the pipeline to ally the advantages of lower resolution and higher context while keeping the samples at a resonable size (a NVIDIA LAPTOP RTX3060 is enough to make production).
+
+## Model
+The model used is called SegFormer.
+...
+
+## Production (Inference)
+A pretrained model is already present in the repo under `model/segmenter_playground`.
+In order to make predictions on new tiles, open the file `production.yaml` and precise the following:
+if you already have the tiles, set their location into `data\source`.
+if you want to download them on swisstopo, use the `downloader` section (`skip_auto_sownloading` -> False). the tiles will be saved in `data\source`.
+A few important parameters:
+- `predictions\model_dir`: Here the default one is the model comming with the repo. If you finetuned it into a new version, precise the path to the new one (not the checkpoint, but the parent of the different checkpoint. it will automatically gofind the best version)
+- `predictions\batch_size`: The initial value is the one used with 6Go of VRAM. Adapat it accordingly to if you have more or less VRAM.
+- `predictions\threshold_preds`: This parameter is very important. A higer value (e.g. 0.5) will lead to less but more precise predictions (less false positives but more false negatives) and a lower value (e.g. 0.25) will lead to the opposite.
+- `to_keep\*`: Choose here which results you want to keep, additionaly to the final product (geopackage).
+
+## Training
+...
+### Preprocessing
+...
+### Finetuning
+...
+
+## Aknowledgement
+[...](https://huggingface.co/docs/transformers/model_doc/segformer)
+[...](https://huggingface.co/models?other=segformer)
