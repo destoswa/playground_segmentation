@@ -1,7 +1,7 @@
 {
   "best_global_step": 92365,
   "best_metric": 0.7801567702460868,
-  "best_model_checkpoint": "results/training\\20260330_161209_segmenter_50_epochs_playground_no_lbl_smoothing\\checkpoint-92365",
+  "best_model_checkpoint": "models\\segmenter_playground\\checkpoint-92365",
   "epoch": 50.0,
   "eval_steps": 500,
   "global_step": 94250,

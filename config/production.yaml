@@ -1,28 +1,28 @@
 data:
-  source: data/Dompierr # path of the folder with the images to process
-  results: default  # where to place the results. If Default, predict next to source
+  source: data/test               # path of the folder with the images to process
+  results: default                # where to place the results. If Default, predict next to source
 downloader:
   skip_auto_downloading: True
-  dest_not_empty: replace # What to do if there is already tiles in the source folder. Choose between 'add', 'stop', 'replace'
-  mode: year  # choose between 'full', 'region', 'area' and 'year'
-  canton: "Genève"  # which canton is chosen if the mode is 'canton'. Need to be chosen between: "Aargau", "Appenzell Ausserrhoden", "Appenzell Innerrhoden", "Basel-Landschaft", "Basel-Stadt", "Bern", "Fribourg", "Genève", "Glarus", "Graubünden", "Jura", "Luzern", "Neuchâtel", "Nidwalden", "Obwalden", "Schaffhausen", "Schwyz", "Solothurn", "St. Gallen", "Thurgau", "Ticino", "Uri", "Valais", "Vaud", "Zug", "Zürich"
-  area: # which delimitation if the mode is 'area'
+  dest_not_empty: replace         # What to do if there is already tiles in the source folder. Choose between 'add', 'stop', 'replace'
+  mode: year                      # choose between 'full', 'region', 'area' and 'year'
+  canton: "Genève"                # which canton is chosen if the mode is 'canton'. Need to be chosen between: "Aargau", "Appenzell Ausserrhoden", "Appenzell Innerrhoden", "Basel-Landschaft", "Basel-Stadt", "Bern", "Fribourg", "Genève", "Glarus", "Graubünden", "Jura", "Luzern", "Neuchâtel", "Nidwalden", "Obwalden", "Schaffhausen", "Schwyz", "Solothurn", "St. Gallen", "Thurgau", "Ticino", "Uri", "Valais", "Vaud", "Zug", "Zürich"
+  area:                           # which delimitation if the mode is 'area'
     Emin: 2580
     Emax: 2589  
     Nmin: 1160
     Nmax: 1169
-  year: 2025  # which year if the mode is 'year'. ALL tiles of the year will be downloaded
+  year: 2025                      # which year if the mode is 'year'. ALL tiles of the year will be downloaded
 predictions:
   model_dir: models/segmenter_playground
-  batch_size: 4 # number of images loaded at once in the VRAM
-  threshold_preds: 0.25 # threshold on probas above which the pixel is classified as playground.
-  tile_size: 512  # need to be adequate with the structure of the model (do not touch!)
-  overlap: 256  # how much overlap is used between two images analyzed by the sliding window
+  batch_size: 4                   # number of images loaded at once in the VRAM
+  threshold_preds: 0.25           # threshold on probas above which the pixel is classified as playground.
+  tile_size: 512                  # need to be adequate with the structure of the model (do not touch!)
+  overlap: 256                    # how much overlap is used between two images analyzed by the sliding window
   scales: [1.0, 0.75, 0.5, 0.25]  # list of scales used. bigger scales = more details, smaller scales = more context
 vectorization:
-  dbscan_eps: 3 # The maximum distance (in pixels) between two samples for one to be considered as in the neighborhood of the other.
+  dbscan_eps: 3           # The maximum distance (in pixels) between two samples for one to be considered as in the neighborhood of the other.
   dbscan_min_samples: 20  # The number of samples (or total weight) in a neighborhood for a point to be considered as a core point.
-  min_cluster_size: 100 # clusters with smaller number of pixels will be dropped
+  min_cluster_size: 100   # clusters with smaller number of pixels will be dropped
   src_color_palette: utils/resources/color_palet.json
 to_keep:
   intermed: True      # keep predictions at different resolution
@@ -30,4 +30,4 @@ to_keep:
   mask_img: True      # keep mask as rgb
   probas: True        # keep probas (monolayer in [0, 1])
   cluster_mono: True  # keep clusters as a monolayer in {0, 1, 2, ...}
-  cluster_img: False  # keep clusters as rgb
+  cluster_img: True   # keep clusters as rgb

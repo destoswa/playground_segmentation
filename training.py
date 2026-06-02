@@ -104,7 +104,7 @@ def training(args):
     LOSS_WEIGHTS = args.train.loss_weights
     PRETRAINED_MODEL = args.train.base_model
     
-    NUM_LAYERS = args.train.num_layers
+    # NUM_LAYERS = args.train.num_layers
     FROM_PRETRAIN = args.train.from_pretrain
     PRETRAIN_DIR = args.train.pretrain_dir
 
@@ -127,7 +127,7 @@ def training(args):
     DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
     
     # Create architecture
-    RESULTS_DIR = os.path.join(OUTPUT_DIR, datetime.now().strftime(r"%Y%m%d_%H%M%S_") + f'{IS_TRAINED}_' + f"{NUM_EPOCHS}_epochs_" + OUTPUT_SUFFIXE)
+    RESULTS_DIR = os.path.join(OUTPUT_DIR, datetime.now().strftime(r"%Y%m%d_%H%M%S_") + f"{NUM_EPOCHS}_epochs_" + OUTPUT_SUFFIXE)
     LOG_DIR = os.path.join(RESULTS_DIR, 'logs')
     CONFMAT_DIR = os.path.join(LOG_DIR, "confmats")
     BESTPREDS_DIR = os.path.join(LOG_DIR, "best_preds")
@@ -162,48 +162,6 @@ def training(args):
             num_labels=2,
             ignore_mismatched_sizes=True  # <- Important for custom classes
         )
-    
-    # # Get original conv
-    # old_conv = segformer.segformer.encoder.patch_embeddings[0].proj
-
-    # # Create new conv with 4 input channels
-    # new_conv = nn.Conv2d(
-    #     in_channels=NUM_LAYERS,
-    #     out_channels=old_conv.out_channels,
-    #     kernel_size=old_conv.kernel_size,
-    #     stride=old_conv.stride,
-    #     padding=old_conv.padding,
-    #     bias=old_conv.bias is not None
-    # )
-
-    # # Initialize weights
-    # with torch.no_grad():
-    #     # Copy RGB weights
-    #     new_conv.weight[:, :3, :, :] = old_conv.weight
-
-    #     # Initialize DEM channel (3 options)
-    #     # new_conv.weight[:, 3:4, :, :] = old_conv.weight.mean(dim=1, keepdim=True)
-    #     # OR zeros:
-    #     # new_conv.weight[:, 3:4, :, :] = 0
-    #     # OR random init:
-    #     nn.init.kaiming_normal_(new_conv.weight[:, 3:4, :, :])
-
-    # # Replace layer
-    # segformer.segformer.encoder.patch_embeddings[0].proj = new_conv
-
-    # # define model depending on type of training
-    # if IS_TRAINED == 'segmenter':
-    #     model = segformer
-    # elif IS_TRAINED == 'fusion':
-    #     config = SegformerConfig.from_pretrained(PRETRAINED_MODEL)
-    #     config.scales = [float(s) for s in SCALES]
-        
-    #     model = MultiScaleFusionModel(
-    #         segformer=segformer,
-    #         scales=[float(s) for s in SCALES],
-    #     )
-    # else:
-    #     raise AttributeError('"is_trained" NOT CORRECT in training.yaml')
 
 
     # ========================================
@@ -218,14 +176,12 @@ def training(args):
     if DATASET_MODE == 'auto':
         full_dataset_train = SegmentationDataset(
             data_dir= DATASET_DIR,
-            processor=None,
             num_layers=3,
             transform=None,
         )
 
         full_dataset_val = SegmentationDataset(
             data_dir= DATASET_DIR,
-            processor=None,
             num_layers=3,
             transform=None,
         )
@@ -245,13 +201,11 @@ def training(args):
     elif DATASET_MODE == 'split':
         train_subset = SegmentationDataset(
             data_dir= TRAINING_SET_DIR,
-            processor=None,
             num_layers=3,
             transform=None,
         )
         val_subset = SegmentationDataset(
             data_dir= VALIDATION_SET_DIR,
-            processor=None,
             num_layers=3,
             transform=None,
         )
@@ -373,20 +327,11 @@ def training(args):
 
             ckpt_path = os.path.join(RESULTS_DIR, f'checkpoint-{best_step}')
             with mute_logging():
-                # if IS_TRAINED == 'segmenter':
                 model = SegformerForSemanticSegmentation.from_pretrained(
                     ckpt_path, 
                     num_labels=2,
                     ignore_mismatched_sizes=True  # <- Important for custom classes
                     )
-                # else:
-                #     model  = MultiScaleFusionModel.from_pretrained(
-                #         segformer_model_name_or_path=get_best_checkpoint(PRETRAIN_DIR),
-                #         scales=SCALES,
-                #         fusion_checkpoint=ckpt_path,
-                #         num_labels=2,
-                #         device=DEVICE,
-                #         )
             DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
             model.to(DEVICE)
             model.eval()
@@ -403,21 +348,10 @@ def training(args):
                 outputs = model(image)
                 if not isinstance(model, SegformerForSemanticSegmentation):
                     outputs = outputs[0]
-                preds = logits_to_preds(logits=outputs.logits, do_upscale=IS_TRAINED=='segmenter').squeeze(0)
+                preds = logits_to_preds(logits=outputs.logits, do_upscale=True).squeeze(0)
                 preds_rgb = np.zeros((preds.shape[0], preds.shape[1], 3), dtype=np.uint8)
                 preds_rgb[preds != 0] = 255
 
-                # proba = torch.softmax(outputs.logits, dim=1)[0,1,...].detach().cpu().numpy()
-                # proba = torch.nn.functional.interpolate(
-                #     torch.softmax(outputs.logits, dim=1),
-                #     size=(preds.shape[0], preds.shape[1]),   # (H_lbl, W_lbl)
-                #     mode="bilinear",
-                #     align_corners=False
-                # )[0,1,...].detach().cpu().numpy()
-
-                # saving images
-                # Image.fromarray(proba).save(os.path.join(src_best_preds_probas, tile_name))
-                # Image.fromarray(preds_rgb).save(os.path.join(src_best_preds_img, tile_name))
                 tiff.imwrite(os.path.join(src_best_preds_bin, tile_name), preds, compression="zstd", compressionargs={"level": 9})
                 shutil.copyfile(src_img, os.path.join(src_best_preds_originals, tile_name))
                 shutil.copyfile(src_labels, os.path.join(src_best_preds_labels, tile_name))

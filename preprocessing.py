@@ -131,7 +131,7 @@ def preprocessing(args):
     # Segmenter args
     SAMPLE_SIZE_SEGMENT = args.preprocessing.sample_size
     BASE_SQUARES = args.preprocessing.base_squares
-    SCALES = args.preprocessing.segmenter.scales
+    SCALES = args.preprocessing.scales
     CROP_SIZE = int(SAMPLE_SIZE_SEGMENT / min(SCALES))
     NUM_SAMPLES_PER_TILE = args.preprocessing.num_samples_per_tile
 
@@ -201,15 +201,27 @@ def preprocessing(args):
 
         # Plot occupied
         results_frac_arr = count_empties / len(list_tiles_img) * 100
-        fig, ax = plt.subplots(figsize=(10,8))
-        ax.plot(results_frac_arr[:,:,1], label=SCALES, linewidth=2)
+
+        linestyles = ['-', '-.', '--', ':', '-', '--', '-.', ':']  # repeats if N > 8
+        markers = ['o', 's', '^', 'D', 'v', 'P', '*', 'X']        # repeats if N > 8
+        size = [3, 2, 1.5, 1.0]
+        fig, ax = plt.subplots(figsize=(10, 8))
+        for i, (curve, label) in enumerate(zip(results_frac_arr[:, :, 1].T, SCALES)):
+            ax.plot(curve,
+                    label=label,
+                    linewidth=3,
+                    linestyle=linestyles[i % len(linestyles)],
+                    marker=markers[i % len(markers)],
+                    markevery=1,
+                    alpha=1.0)
+
         ax.set_ylabel('Pourcentage [%]')
         ax.legend()
         ax.set_xticks(range(len(BASE_SQUARES)))
         ax.set_xticklabels(BASE_SQUARES)
         ax.set_xlabel('base squares [px]')
         ax.set_ylabel('fraction [%]')
-        ax.set_ylim([0,105])
+        ax.set_ylim([0, 105])
         ax.grid()
         
         plt.title("Fraction of occupied samples")

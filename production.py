@@ -130,13 +130,14 @@ def prediction(
         threshold_proba= 0.5,
         do_save_mask=True,
         do_save_img=True,
+        do_save_inter=True,
         do_save_probas=True,
         ):
     
     # predict at each resolution
     images = []
     preds = []
-    masks = {}
+    # masks = []
     probas = []
 
     # load model
@@ -147,7 +148,7 @@ def prediction(
     model.eval()
 
     for res in resolutions:
-        res_img, src_res_img = produce_with_lower_res(src_img, src_inter, res, do_show=False)
+        res_img, src_res_img = produce_with_lower_res(src_img, src_inter, res, do_save=do_save_inter, do_show=False)
         pred_mask, preds_img, proba_img = predict_with_batch(
             image=res_img, 
             model=model, 
@@ -163,16 +164,13 @@ def prediction(
         images.append(res_img)
         preds.append(preds_img)
         # masks.append(pred_mask)
-        masks[res] = pred_mask
+        # masks[res] = pred_mask
         probas.append(proba_img)
 
     # merge different resolutions into one final
     original_img = Image.open(src_img)
 
     W, H = original_img.size
-
-
-
 
     final_probas = np.zeros((W,H), dtype=np.float32)
 
@@ -187,7 +185,16 @@ def prediction(
     final_product[final_probas >= threshold_proba] = 1
     final_probas = (final_probas * 255).astype(np.uint8)
 
-    #   _creation of final preds
+    # save inter
+    if do_save_inter:
+        for id_res, res in enumerate(resolutions):
+            rescaled_mask = Image.fromarray(preds[id_res]).resize((W, H), Image.NEAREST)
+            # final_product += rescaled_mask
+
+            src_dest_preds_mask = os.path.join(src_inter, os.path.splitext(os.path.basename(src_img))[0] + f'_res_{res}_preds_mask.tif')
+            tiff.imwrite(src_dest_preds_mask, rescaled_mask, compression="zstd", compressionargs={"level": 9})
+
+    # creation of final preds
     final_product_rgb = np.zeros((W, H, 3))
     final_product_rgb[final_product == 1] = 255
 
@@ -255,9 +262,6 @@ def clustering(img_arr, src_dest, eps, min_samples, min_cluster_size,  color_pal
 
     if do_save_img:
         tiff.imwrite(src_img, rgb_clusters.astype(np.uint8), compression="zstd", compressionargs={"level": 9})
-    if do_save_mono:
-        tiff.imwrite(src_mask, mask_clusters.astype(np.uint16), compression="zstd", compressionargs={"level": 9})
-
     tiff.imwrite(src_mask, mask_clusters.astype(np.uint16), compression="zstd", compressionargs={"level": 9})
 
     return src_mask, src_img
@@ -291,6 +295,7 @@ def vectorize(src_target, src_dest):
 
     return src_polygons
 
+
 def production(args):
     start_time = time()
 
@@ -306,7 +311,6 @@ def production(args):
     MODEL_DIR = args.predictions.model_dir
     BATCH_SIZE = args.predictions.batch_size
     THRESHOLD_PREDS = args.predictions.threshold_preds
-    # THRESHOLD_GROUPING = args.predictions.threshold_grouping
     TILE_SIZE = args.predictions.tile_size
     OVERLAP = args.predictions.overlap
     STRIDE = TILE_SIZE - OVERLAP
@@ -319,19 +323,18 @@ def production(args):
     KEEP_CLUSTER_IMG = args.to_keep.cluster_img
 
     DEST_PREDS = DEST_ORIGINAL_TILES if DEST_PREDS.lower() == 'default' else DEST_PREDS
-    dest_preds_dir = os.path.join(DEST_PREDS, 'predictions')
-    dest_probas_dir = os.path.join(DEST_PREDS, 'probas')
-    dest_clusters_dir = os.path.join(DEST_PREDS, 'clusters')
-    dest_vectors_dir = os.path.join(DEST_PREDS, 'vectors')
-    dest_originals_dir = os.path.join(DEST_PREDS, 'originals')
-    dest_inter_dir = os.path.join(DEST_PREDS, 'inter')
+    dest_inter_dir = os.path.join(DEST_PREDS, '0_inter')
+    dest_probas_dir = os.path.join(DEST_PREDS, '1_probas')
+    dest_preds_dir = os.path.join(DEST_PREDS, '2_predictions')
+    dest_clusters_dir = os.path.join(DEST_PREDS, '3_clusters')
+    dest_vectors_dir = os.path.join(DEST_PREDS, '4_vectors')
 
     # === TILES DOWNLOADING ===
     # =========================
     os.makedirs(DEST_ORIGINAL_TILES, exist_ok=True)
     if not SKIP_AUTO_DOWNLOADING:
         lst_tiles_src = tiles_downloading(
-            dest_tiles=dest_originals_dir,
+            dest_tiles=DEST_PREDS,
             downloading_mode=DOWNLOADING_MODE,
             canton=CANTON,
             area=AREA,
@@ -345,18 +348,21 @@ def production(args):
     if len(lst_tiles_src) == 0:
         print("NO TILE TO PROCESS!")
         return
+    
+    if KEEP_MASK_BIN or KEEP_MASK_IMG:
+        os.makedirs(dest_preds_dir, exist_ok=True)
+    if KEEP_PROBAS:
+        os.makedirs(dest_probas_dir, exist_ok=True)
+    # if KEEP_CLUSTER_IMG or KEEP_CLUSTER_MONO:
+    if KEEP_INTERMED_FILES:
+        os.makedirs(dest_inter_dir, exist_ok=True)
 
-    os.makedirs(dest_preds_dir, exist_ok=True)
-    os.makedirs(dest_probas_dir, exist_ok=True)
     os.makedirs(dest_clusters_dir, exist_ok=True)
     os.makedirs(dest_vectors_dir, exist_ok=True)
-    os.makedirs(dest_inter_dir, exist_ok=True)
 
     for _, src_img in tqdm(enumerate(lst_tiles_src), total=len(lst_tiles_src), desc="Processing tiles"):
-
         # === PREDICTIONS =====
         # =====================
-        # time_start = time()
         pred_mask_arr, src_pred_mask, src_pred_img, src_proba_mask = prediction(
             src_img=src_img,
             src_inter=dest_inter_dir,
@@ -401,8 +407,8 @@ def production(args):
             geo_transfert(src_img, src_pred_img, True)
         if KEEP_PROBAS:
             geo_transfert(src_img, src_proba_mask, True)
-        if KEEP_CLUSTER_MONO:
-            geo_transfert(src_img, src_clusters_mask, True)
+        # if KEEP_CLUSTER_MONO:
+        geo_transfert(src_img, src_clusters_mask, True)
         if KEEP_CLUSTER_IMG:
             geo_transfert(src_img, src_clusters_img, True)
         
@@ -416,13 +422,8 @@ def production(args):
 
         if not KEEP_CLUSTER_MONO:
             os.remove(src_clusters_mask)
-        # if not KEEP_MASK_BIN:
-        #     os.remove(src_pred_mask)
-        # if not KEEP_PROBAS:
-        #     os.remove(src_proba_mask)
-
-    if not KEEP_INTERMED_FILES:
-        shutil.rmtree(dest_inter_dir)
+            if not os.listdir(dest_clusters_dir):
+                os.rmdir(dest_clusters_dir)
 
     # Show duration of process
     delta_time_loop = time() - start_time

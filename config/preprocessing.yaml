@@ -1,8 +1,8 @@
 preprocessing:
-  tiles_location: path/to/raw_data
-  results_location: data/preprocessing
-  suffixe: landslides_tiles
-  base_squares: [256, 512, 768, 1024]
-  scales: [1.0, 0.75, 0.5, 0.25]
-  sample_size: 512
-  num_samples_per_tile: 1
+  tiles_location: data/test_preprocessing           # the path to the tiles to be augmented
+  results_location: data/test_preprocessing/results # where the architecture of the resulting samples is going to be saved
+  suffixe: landslides_tiles                         # the suffixe to the architecture name
+  base_squares: [256, 512, 768, 1024]               # the different center squares used for the random shifts
+  scales: [1.0, 0.75, 0.5, 0.25]                    # the different scales of output results
+  sample_size: 512                                  # the size of the resulting samples
+  num_samples_per_tile: 1                           # how many samples are extracted from each tile for each set of (baset_square, scale)
