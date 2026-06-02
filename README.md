@@ -30,9 +30,13 @@ However, those images were alternated to obtaine version with greater context an
 This versatility allows then, in the Inference phase (production.py), to assess the samples under multiple resolutions. By doing that and regrouping the different predictions together, it allows the pipeline to ally the advantages of lower resolution and higher context while keeping the samples at a resonable size (a NVIDIA LAPTOP RTX3060 is enough to make production).
 
 ## Model
-The model used is called SegFormer.
-...
+The model used is called SegFormer. It is available on Huggingface database (see links in acknowledgements).
+
+It's particularity is the use of Mix Transformer which allow the use of both self-attention and cnn into a computational power efficient architecture.
+
 ![segformer architecture](medias/segformer_architecture.png)
+
+The different available pretrained model of Huggingface are listed [here](https://huggingface.co/models?other=segformer) .
 ## Production (Inference)
 A pretrained model is already present in the repo under `model/segmenter_playground`.
 In order to make predictions on new tiles, open the file `production.yaml` and precise the following:
@@ -52,6 +56,7 @@ A few important parameters:
 ### Finetuning
 ...
 
-## Aknowledgement
-[...](https://huggingface.co/docs/transformers/model_doc/segformer)
-[...](https://huggingface.co/models?other=segformer)
+## Acknowledgements
+This project was done by using both the [Transformers](https://huggingface.co/docs/transformers/index) library and the 
+[SegFormer](https://huggingface.co/docs/transformers/model_doc/segformer) model of Huggingface.
+
