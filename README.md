@@ -35,7 +35,14 @@ The model used is called SegFormer.
 
 ## Production (Inference)
 A pretrained model is already present in the repo under `model/segmenter_playground`.
-In order to make predictions on new tiles, open the file `production.yaml` and 
+In order to make predictions on new tiles, open the file `production.yaml` and precise the following:
+if you already have the tiles, set their location into `data\source`.
+if you want to download them on swisstopo, use the `downloader` section (`skip_auto_sownloading` -> False). the tiles will be saved in `data\source`.
+A few important parameters:
+- `predictions\model_dir`: Here the default one is the model comming with the repo. If you finetuned it into a new version, precise the path to the new one (not the checkpoint, but the parent of the different checkpoint. it will automatically gofind the best version)
+- `predictions\batch_size`: The initial value is the one used with 6Go of VRAM. Adapat it accordingly to if you have more or less VRAM.
+- `predictions\threshold_preds`: This parameter is very important. A higer value (e.g. 0.5) will lead to less but more precise predictions (less false positives but more false negatives) and a lower value (e.g. 0.25) will lead to the opposite.
+- `to_keep\*`: Choose here which results you want to keep, additionaly to the final product (geopackage).
 
 ## Training
 ...
