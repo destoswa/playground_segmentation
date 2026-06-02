@@ -30,13 +30,20 @@ However, those images were alternated to obtaine version with greater context an
 This versatility allows then, in the Inference phase (production.py), to assess the samples under multiple resolutions. By doing that and regrouping the different predictions together, it allows the pipeline to ally the advantages of lower resolution and higher context while keeping the samples at a resonable size (a NVIDIA LAPTOP RTX3060 is enough to make production).
 
 ## Model
+The model used is called SegFormer.
 ...
 
-## Inference
-...
+## Production (Inference)
+A pretrained model is already present in the repo under `model/segmenter_playground`.
+In order to make predictions on new tiles, open the file `production.yaml` and 
 
 ## Training
 ...
+### Preprocessing
+...
+### Finetuning
+...
 
 ## Aknowledgement
-...
+[...](https://huggingface.co/docs/transformers/model_doc/segformer)
+[...](https://huggingface.co/models?other=segformer)
