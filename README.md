@@ -17,6 +17,10 @@ to install this pipeline, you need to have CUDA installed on your machine and fo
     cd playground_segmentation
     python -m venv .venv
     ```
+3) Activate environment
+    ```
+  .venv\Script\activate
+    ```
 4) Install the libaries
     ```
     pip install -r requirements.txt
