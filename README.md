@@ -49,12 +49,23 @@ A few important parameters:
 - `to_keep\*`: Choose here which results you want to keep, additionaly to the final product (geopackage).
 
 ## Training
-...
+The training of a model is done via the script `training.py` and is driven by the configuration file `config/training.yaml`.
+It is possible to train a new model:
+- from one of the pretrained model of NVIDIA
+- from a pretrained model of this project
+- from an interrupted training 
+
 ### Preprocessing
-...
+The preprocessing is a tool that help to prepare a dataset from a set of tiles of bigger size (e.g. 4100px) centered on the object of interest, to cropped version (e.g. 512px) of different scales. It is run through the script `preprocessing.yaml`, drive by teh configuration file `config\preprocessing.yaml`
+
+As explained in the figure, 16 versions of the dataset (more precisaly, it is producing $N_{central squares} \cdot N_{scales}$ datasets) are produced. The idea is then for the user to choose, for each scale, the version with the central square which offers the best ratio of empty/occupied samples. This ratio can be seen for each configuration in the generated figure `fraction_of_occupied.png` in the resulting folder.
+
 ![preprocessing schema](medias/preprocessing.png)
+
 ### Finetuning
-...
+With the use of the model and the correction by human eye, new data should start to be produce. Moreover, some patterns of false positives might start to be visible with corrections. From these samples can be extracted a dataset to finetune the model.
+
+In order to generate this dataset, a tutorial (the file `tuto_finetuning.md`) is available at the root of the project. It will help the user to create the tiles and then use the preprocessing script.
 
 ## Acknowledgements
 This project was done by using both the [Transformers](https://huggingface.co/docs/transformers/index) library and the 
