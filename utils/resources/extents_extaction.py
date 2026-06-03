@@ -4,9 +4,9 @@ import os
 
 
 # === PARAMETERS ===
-output_source = "path/to/output_dataset"    # where the resulting dataset will be created
-tiles_rectangle_layer_name = "tiles_410m"   # the name of the layer with the rectangles bboxing the tiles
-what_to_process = 'images'                  # choose between 'images' and 'masks' depending on the step you're at
+output_source = "Extents"    # where the resulting dataset will be created
+tiles_rectangle_layer_name = "tiles_4100"   # the name of the layer with the rectangles bboxing the tiles
+what_to_process = 'masks'                  # choose between 'images' and 'masks' depending on the step you're at
 do_skip_existing = True                     # usefull if QGIS failed and you want to rerun a partially failed process
 # ==================
 
@@ -20,8 +20,10 @@ layer = QgsProject.instance().mapLayersByName(tiles_rectangle_layer_name)[0]
 canvas_layers = iface.mapCanvas().layers()  # get ONCE
 
 for counter, feat in enumerate(layer.getFeatures()):
-    out_path = os.path.join(src_extents, f"image_{feat['id'].replace('/', '_')}.tif")
+    #out_path = os.path.join(src_extents, f"image_{feat['fid'].replace('/', '_')}.tif")
+    out_path = os.path.join(src_extents, f"image_{counter}.tif")
     if os.path.exists(out_path) and do_skip_existing:
+        print('derp')
         continue
 
     # ✅ Direct bbox from feature
