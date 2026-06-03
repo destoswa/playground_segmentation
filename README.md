@@ -11,11 +11,14 @@ to install this pipeline, you need to have CUDA installed on your machine and fo
     ```
     git clone --depth=1 https://github.com/destoswa/playground_segmentation
     ```
-  
 2) Create a virtual environment
     ```
     cd playground_segmentation
     python -m venv .venv
+    ```
+3) Activate environment
+    ```
+    .venv\Scripts\activate
     ```
 4) Install the libaries
     ```
