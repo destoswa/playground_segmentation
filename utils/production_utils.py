@@ -21,7 +21,7 @@ if __name__ == "__main__":
     sys.path.append(os.getcwd())
 
 from transformers import AutoImageProcessor, SegformerForSemanticSegmentation
-from utils.dataset import get_multiscale_patch
+# from utils.dataset import get_multiscale_patch
 
 
 # ===========================================

@@ -17,9 +17,14 @@ to install this pipeline, you need to have CUDA installed on your machine and fo
     python -m venv .venv
     ```
 3) Activate environment
-    ```
-    .venv\Scripts\activate
-    ```
+   1) On Windows
+        ```
+        .venv\Scripts\activate
+        ```
+    2) On Linux
+        ```
+        .venv\bin\activate
+        ```
 4) Install the libaries
     ```
     pip install -r requirements.txt

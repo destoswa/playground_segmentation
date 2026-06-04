@@ -137,7 +137,6 @@ def prediction(
     # predict at each resolution
     images = []
     preds = []
-    # masks = []
     probas = []
 
     # load model
@@ -149,7 +148,7 @@ def prediction(
 
     for res in resolutions:
         res_img, src_res_img = produce_with_lower_res(src_img, src_inter, res, do_save=do_save_inter, do_show=False)
-        pred_mask, preds_img, proba_img = predict_with_batch(
+        _, preds_img, proba_img = predict_with_batch(
             image=res_img, 
             model=model, 
             img_path=src_res_img,
@@ -163,8 +162,6 @@ def prediction(
             )
         images.append(res_img)
         preds.append(preds_img)
-        # masks.append(pred_mask)
-        # masks[res] = pred_mask
         probas.append(proba_img)
 
     # merge different resolutions into one final
@@ -189,14 +186,12 @@ def prediction(
     if do_save_inter:
         for id_res, res in enumerate(resolutions):
             rescaled_mask = Image.fromarray(preds[id_res]).resize((W, H), Image.NEAREST)
-            # final_product += rescaled_mask
-
             src_dest_preds_mask = os.path.join(src_inter, os.path.splitext(os.path.basename(src_img))[0] + f'_res_{res}_preds_mask.tif')
             tiff.imwrite(src_dest_preds_mask, rescaled_mask, compression="zstd", compressionargs={"level": 9})
 
     # creation of final preds
     final_product_rgb = np.zeros((W, H, 3))
-    final_product_rgb[final_product == 1] = 255
+    final_product_rgb[np.broadcast_to(final_product[:, :, np.newaxis], final_product_rgb.shape) == 1] = 255
 
     src_final_preds_mask = os.path.join(src_dest_preds, os.path.splitext(os.path.basename(src_img))[0] + f'_mask.tif')
     src_final_preds_img = os.path.join(src_dest_preds, os.path.splitext(os.path.basename(src_img))[0] + f'_img.tif')
@@ -212,7 +207,7 @@ def prediction(
     return final_product, src_final_preds_mask, src_final_preds_img, src_final_probas_mask#, src_final_probas_img
 
 
-def clustering(img_arr, src_dest, eps, min_samples, min_cluster_size,  color_palette, do_save_img=True, do_save_mono=True):
+def clustering(img_arr, src_dest, eps, min_samples, min_cluster_size,  color_palette, do_save_img=True):
     # extract coordinates of landslides
     pos_ls = np.argwhere(img_arr)
 
@@ -434,6 +429,24 @@ def production(args):
 
 
 if __name__ == "__main__":
+    # M = np.arange(12).reshape((2,2,3))
+    # mask = np.array([[1,0],[0,1]], dtype=np.bool)
+    # print(M)
+    # print(M[mask])
+    # print(M[mask].shape)
+    # B = np.array([[0,1],[1,0]])
+    # print(B[:,:,np.newaxis].shape)
+    # C = np.broadcast_to(B[:,:,np.newaxis],M.shape) > 0
+    # print(B[:,0])
+    # print(C[:,0,0])
+    # print(C[:,0,1])
+    # print(C[:,0,2])
+    # M[C] = 999
+    # print(M)
+    # # M[B[:,:,np.newaxis] > 0] = 99
+    # # print(M)
+
+    # quit()
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="")
     args = parser.parse_args()

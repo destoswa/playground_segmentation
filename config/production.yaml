@@ -3,7 +3,7 @@ data:
   results: default                # where to place the results. If Default, predict next to source
 downloader:
   skip_auto_downloading: True
-  dest_not_empty: replace         # What to do if there is already tiles in the source folder. Choose between 'add', 'stop', 'replace'
+  dest_not_empty: replace         # what to do if there is already tiles in the source folder. Choose between 'add', 'stop', 'replace'
   mode: year                      # choose between 'full', 'region', 'area' and 'year'
   canton: "Genève"                # which canton is chosen if the mode is 'canton'. Need to be chosen between: "Aargau", "Appenzell Ausserrhoden", "Appenzell Innerrhoden", "Basel-Landschaft", "Basel-Stadt", "Bern", "Fribourg", "Genève", "Glarus", "Graubünden", "Jura", "Luzern", "Neuchâtel", "Nidwalden", "Obwalden", "Schaffhausen", "Schwyz", "Solothurn", "St. Gallen", "Thurgau", "Ticino", "Uri", "Valais", "Vaud", "Zug", "Zürich"
   area:                           # which delimitation if the mode is 'area'
@@ -20,10 +20,10 @@ predictions:
   overlap: 256                    # how much overlap is used between two images analyzed by the sliding window
   scales: [1.0, 0.75, 0.5, 0.25]  # list of scales used. bigger scales = more details, smaller scales = more context
 vectorization:
-  dbscan_eps: 3           # The maximum distance (in pixels) between two samples for one to be considered as in the neighborhood of the other.
-  dbscan_min_samples: 20  # The number of samples (or total weight) in a neighborhood for a point to be considered as a core point.
+  dbscan_eps: 3           # the maximum distance (in pixels) between two samples for one to be considered as in the neighborhood of the other.
+  dbscan_min_samples: 20  # the number of samples (or total weight) in a neighborhood for a point to be considered as a core point.
   min_cluster_size: 100   # clusters with smaller number of pixels will be dropped
-  src_color_palette: utils/resources/color_palet.json
+  src_color_palette: utils/resources/color_palet.json # color palette used for cluster_img
 to_keep:
   intermed: True      # keep predictions at different resolution
   mask_bin: True      # keep mask as a monolayer in {0,1}
