@@ -429,24 +429,6 @@ def production(args):
 
 
 if __name__ == "__main__":
-    # M = np.arange(12).reshape((2,2,3))
-    # mask = np.array([[1,0],[0,1]], dtype=np.bool)
-    # print(M)
-    # print(M[mask])
-    # print(M[mask].shape)
-    # B = np.array([[0,1],[1,0]])
-    # print(B[:,:,np.newaxis].shape)
-    # C = np.broadcast_to(B[:,:,np.newaxis],M.shape) > 0
-    # print(B[:,0])
-    # print(C[:,0,0])
-    # print(C[:,0,1])
-    # print(C[:,0,2])
-    # M[C] = 999
-    # print(M)
-    # # M[B[:,:,np.newaxis] > 0] = 99
-    # # print(M)
-
-    # quit()
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="")
     args = parser.parse_args()
