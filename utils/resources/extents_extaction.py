@@ -5,7 +5,7 @@ import os
 
 # === PARAMETERS ===
 output_source = "Extents"    # where the resulting dataset will be created
-tiles_rectangle_layer_name = "tiles_4100"   # the name of the layer with the rectangles bboxing the tiles
+tiles_rectangle_layer_name = "bboxes"   # the name of the layer with the rectangles bboxing the tiles
 what_to_process = 'masks'                  # choose between 'images' and 'masks' depending on the step you're at
 do_skip_existing = True                     # usefull if QGIS failed and you want to rerun a partially failed process
 # ==================

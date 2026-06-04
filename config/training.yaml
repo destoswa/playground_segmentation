@@ -1,16 +1,16 @@
 train:
   output_dir: "results/training"  # where to save resulting model
-  output_suffixe: test            # what suffixe for the resulting folder (data and time will be automatically added in name to avoid overrights)
-  val_split: 0.1            # which fraction of the dataset is used for the validation (the rest will go for training set)
-  frac_data: 0.01           # how much of the dataset will be used in total (mostly used in developing phase)
-  num_epochs: 2             # number of time the full dataset is passed through the training loop
-  batch_size: 4             # number of samples loaded at the same time in the VRAM
-  num_workers: 4            # how many CPU processes are used by the DataLoader to prepare the batches
-  learning_rate: 5e-5       # has been finetuned. do not touch
-  weight_decay: 0.01        # has been finetuned. do not touch
-  label_smoothing: 0.0      # if you want to use label smoothing, change for a greater value than 0 (e.g. 1e-3, 0.01, 0.1)
-  loss_weights: [1,5]       # how much weight is given to respectively the background and the playgrounds. Compensate for classes imbalance
-  from_pretrain: True       # if training from a pretrained model (e.g. the one already present in the repo)
+  output_suffixe: test_production # what suffixe for the resulting folder (data and time will be automatically added in name to avoid overrights)
+  val_split: 0.1                  # which fraction of the dataset is used for the validation (the rest will go for training set)
+  frac_data: 0.01                 # how much of the dataset will be used in total (mostly used in developing phase)
+  num_epochs: 2                   # number of time the full dataset is passed through the training loop
+  batch_size: 4                   # number of samples loaded at the same time in the VRAM
+  num_workers: 4                  # how many CPU processes are used by the DataLoader to prepare the batches
+  learning_rate: 5e-5             # has been finetuned. do not touch
+  weight_decay: 0.01              # has been finetuned. do not touch
+  label_smoothing: 0.0            # if you want to use label smoothing, change for a greater value than 0 (e.g. 1e-3, 0.01, 0.1)
+  loss_weights: [1,5]             # how much weight is given to respectively the background and the playgrounds. Compensate for classes imbalance
+  from_pretrain: True             # if training from a pretrained model (e.g. the one already present in the repo)
   pretrain_dir: models/segmenter_playground             # the path to the pretrained model's directory
   resume_from_existing: False                           # if the training is canceled early, it can be resumed here
   existing_dir: results/training/failed_training        # path to the failed training

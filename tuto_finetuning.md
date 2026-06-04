@@ -1,23 +1,30 @@
 # Tutorial - Finetuning with new samples
-In order to finetune the model
 
 ## 1) Setting up
-In order to produce the training set you need:
-(a) QGIS with a map covering all the AoI
-(b) A layer with the centroids of the AoI
-(c) If finetuning on True Positives (i.e. playgrounds that were not found by the model), a layer with the polygons of each playground in full white.
-(d) A layer with one black polygon covering all the AoI
+In order to produce the training set you need: 
+<ol type="a">
+  <li>QGIS with a map covering all the AoI</li>
+  <li>A layer with the centroids of the AoI
+    <ul>
+      <li>If just a list of True Negatives (samples that don't contain playground), create a layer of type <b><i>Point</i></b>.</li>
+      <li>If from a list of polygons, you can use the tool <b><i>Vector geometry -> Centroids</i></b></li>
+    </ul>
+  </li>
+  <li>If finetuning on True Positives (i.e. playgrounds that were not found by the model), a layer with the polygons of each playground in full white.</li>
+  <li>A layer with one black polygon covering all the AoI</li>
+</ol>
 
 ## 2) Extract Images
-- Create a layer with Rectangles of fixed size, centered on the centroids.
+- Create a layer, named **_bboxes_**, with Rectangles of fixed size, centered on the centroids.
   - e.g. 410m $\cdot$ 10px/m -> 4100px tiles
-- Show only the map (a)
+  - This is done by using the tool **_Vector geometry -> Rectangles, ovals, diamonds_**
+- Show only the map (a), disable everything else
 - Run the script `extents_extraction.py` in QGIS's python IDE
   - Adapt parameters at the beginning of the script
   - Can take a lot of time
 
 ## 3) Extract masks
-- Show only black background (4) with either nothing (if producing True negatives) or the polygons (3) on top of it.
+- Show only black background (d) with either nothing else (if producing True negatives) or the polygons (c) on top of it.
 - **IMPORTANT**: Do NOT just cover the map, **Disable it!** The process will be 100x faster.
 - Run the script `extents_extraction.py` (think to change the `what_to_process` parameter)
 
