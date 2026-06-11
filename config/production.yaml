@@ -1,10 +1,10 @@
 data:
-  source: data/test               # path of the folder with the images to process
-  results: default                # where to place the results. If Default, predict next to source
-downloader:
-  skip_auto_downloading: True
+  source: data/test_20_tuiles/images              # path of the folder with the images to process
+  results: data/test_20_tuiles/th=0.35                # where to place the results. If Default, predict next to source
+downloader: # more details on this tool in the readme on section Production/downloader
+  skip_auto_downloading: True     # if True, it will skip the downloading part and use the existing data. If False, it will download images from swisstopo using parameters of this section
   dest_not_empty: replace         # what to do if there is already tiles in the source folder. Choose between 'add', 'stop', 'replace'
-  mode: year                      # choose between 'full', 'region', 'area' and 'year'
+  mode: year                      # choose between 'full', 'canton', 'area' and 'year'
   canton: "Genève"                # which canton is chosen if the mode is 'canton'. Need to be chosen between: "Aargau", "Appenzell Ausserrhoden", "Appenzell Innerrhoden", "Basel-Landschaft", "Basel-Stadt", "Bern", "Fribourg", "Genève", "Glarus", "Graubünden", "Jura", "Luzern", "Neuchâtel", "Nidwalden", "Obwalden", "Schaffhausen", "Schwyz", "Solothurn", "St. Gallen", "Thurgau", "Ticino", "Uri", "Valais", "Vaud", "Zug", "Zürich"
   area:                           # which delimitation if the mode is 'area'
     Emin: 2580
@@ -15,19 +15,21 @@ downloader:
 predictions:
   model_dir: models/segmenter_playground
   batch_size: 4                   # number of images loaded at once in the VRAM
-  threshold_preds: 0.25           # threshold on probas above which the pixel is classified as playground.
+  threshold_preds: 0.35           # threshold on probas above which the pixel is classified as playground.
   tile_size: 512                  # need to be adequate with the structure of the model (do not touch!)
   overlap: 256                    # how much overlap is used between two images analyzed by the sliding window
   scales: [1.0, 0.75, 0.5, 0.25]  # list of scales used. bigger scales = more details, smaller scales = more context
 vectorization:
-  dbscan_eps: 3           # the maximum distance (in pixels) between two samples for one to be considered as in the neighborhood of the other.
-  dbscan_min_samples: 20  # the number of samples (or total weight) in a neighborhood for a point to be considered as a core point.
-  min_cluster_size: 100   # clusters with smaller number of pixels will be dropped
+  do_merge_results: True   # Once every tile has been processed, produce a version of the gpkg with all the features merged
+  dbscan_eps: 1            # the maximum distance (in pixels) between two samples for one to be considered as in the neighborhood of the other.
+  dbscan_min_samples: 3    # the number of samples (or total weight) in a neighborhood for a point to be considered as a core point.
+  min_cluster_size: 1000   # clusters with smaller number of pixels will be dropped
   src_color_palette: utils/resources/color_palet.json # color palette used for cluster_img
-to_keep:
-  intermed: True      # keep predictions at different resolution
-  mask_bin: True      # keep mask as a monolayer in {0,1}
-  mask_img: True      # keep mask as rgb
-  probas: True        # keep probas (monolayer in [0, 1])
-  cluster_mono: True  # keep clusters as a monolayer in {0, 1, 2, ...}
-  cluster_img: True   # keep clusters as rgb
+to_keep:               # in addition to the geopackage
+  intermed: False      # keep predictions at different resolution
+  mask_bin: False      # keep final predictions as a monolayer in {0,1}
+  mask_img: False      # keep final predictions as rgb
+  probas: False        # keep probas (monolayer in [0, 1])
+  cluster_mono: False  # keep clusters as a monolayer in {0, 1, 2, ...}
+  cluster_img: False   # keep clusters as rgb
+verbose: False

@@ -19,14 +19,14 @@ In order to produce the training set you need:
   - e.g. 410m $\cdot$ 10px/m -> 4100px tiles
   - This is done by using the tool **_Vector geometry -> Rectangles, ovals, diamonds_**
 - Show only the map (a), disable everything else
-- Run the script `extents_extraction.py` in QGIS's python IDE
+- Run the script `qgis_extents_extraction.py` in QGIS's python IDE
   - Adapt parameters at the beginning of the script
   - Can take a lot of time
 
 ## 3) Extract masks
 - Show only black background (d) with either nothing else (if producing True negatives) or the polygons (c) on top of it.
 - **IMPORTANT**: Do NOT just cover the map, **Disable it!** The process will be 100x faster.
-- Run the script `extents_extraction.py` (think to change the `what_to_process` parameter)
+- Run the script `qgis_extents_extraction.py` (think to change the `what_to_process` parameter)
 
 ## 4) Preprocessing
 - Run the preprocessing.py script on the dataset.

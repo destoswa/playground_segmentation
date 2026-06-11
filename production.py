@@ -3,6 +3,7 @@ import shutil
 import json
 import argparse
 import numpy as np
+import pandas as pd
 import geopandas as gpd
 from tqdm import tqdm
 from PIL import Image
@@ -207,7 +208,15 @@ def prediction(
     return final_product, src_final_preds_mask, src_final_preds_img, src_final_probas_mask#, src_final_probas_img
 
 
-def clustering(img_arr, src_dest, eps, min_samples, min_cluster_size,  color_palette, do_save_img=True):
+def clustering(
+        img_arr, 
+        src_dest, 
+        eps, 
+        min_samples, 
+        min_cluster_size,  
+        color_palette, 
+        do_save_img=True,
+        ):
     # extract coordinates of landslides
     pos_ls = np.argwhere(img_arr)
 
@@ -285,10 +294,65 @@ def vectorize(src_target, src_dest):
             lambda geom: affine_transform(geom, [1, 0, 0, -1, 0, 0])
         )
 
-    src_polygons = os.path.join(src_dest, os.path.splitext(os.path.basename(src_target))[0] + '_landslides.gpkg')
-    gdf.to_file(src_polygons, driver="GPKG")
+    src_polygons = os.path.join(src_dest, os.path.splitext(os.path.basename(src_target))[0] + '_playgrounds.gpkg')
+    gdf.to_file(src_polygons, layer='polygons', driver="GPKG")
+
+    # compute centroids
+    geometry_points = gdf.geometry.centroid
+    gdf_centroids = gpd.GeoDataFrame(gdf, geometry=geometry_points, crs=crs)
+    gdf_centroids.to_file(src_polygons, layer='centroids', driver="GPKG")
 
     return src_polygons
+
+
+def merge_final_results(src_target, src_output, verbose=False):
+    list_files = [os.path.join(src_target, x) for x in os.listdir(src_target) if x.endswith('.gpkg')]
+    output_polygons = os.path.join(src_output, "merged_polygons.gpkg")
+    output_centroids = os.path.join(src_output, "merged_centroids.gpkg")
+
+    # --------------------------------
+    # Load and merge
+    # --------------------------------
+    polygons_list = []
+    centroids_list = []
+
+    for f in list_files:
+        gdf_polygons = gpd.read_file(f, layer='polygons')
+        gdf_centroids = gpd.read_file(f, layer='centroids')
+
+        # Extract polygons
+        poly = gdf_polygons[['geometry']].copy()  # adjust fields as needed
+        poly['update_state'] = None
+        poly['source'] = os.path.basename(f)
+        polygons_list.append(poly)
+
+        # Extract centroids
+        cent = gdf_centroids[['geometry']].copy()  # adjust fields as needed
+        cent['update_state'] = None
+        cent['source'] = os.path.basename(f)
+        centroids_list.append(cent)
+
+    # --------------------------------
+    # Concatenate
+    # --------------------------------
+    merged_polygons = gpd.GeoDataFrame(
+        pd.concat(polygons_list, ignore_index=True),
+        crs=polygons_list[0].crs
+    )
+
+    merged_centroids = gpd.GeoDataFrame(
+        pd.concat(centroids_list, ignore_index=True),
+        crs=centroids_list[0].crs
+    )
+
+    # --------------------------------
+    # Save
+    # --------------------------------
+    merged_polygons.to_file(output_polygons, driver="GPKG")
+    merged_centroids.to_file(output_centroids, driver="GPKG")
+    if verbose:
+        print(f"Polygons saved to {output_polygons} — {len(merged_polygons)} features")
+        print(f"Centroids saved to {output_centroids} — {len(merged_centroids)} features")
 
 
 def production(args):
@@ -348,7 +412,6 @@ def production(args):
         os.makedirs(dest_preds_dir, exist_ok=True)
     if KEEP_PROBAS:
         os.makedirs(dest_probas_dir, exist_ok=True)
-    # if KEEP_CLUSTER_IMG or KEEP_CLUSTER_MONO:
     if KEEP_INTERMED_FILES:
         os.makedirs(dest_inter_dir, exist_ok=True)
 
@@ -392,7 +455,6 @@ def production(args):
             min_cluster_size=MIN_CLUSTER_SIZE,
             color_palette=color_palette,
             do_save_img=KEEP_CLUSTER_IMG,
-            do_save_mono=KEEP_CLUSTER_MONO,
             )
 
         # georeference files
@@ -417,8 +479,16 @@ def production(args):
 
         if not KEEP_CLUSTER_MONO:
             os.remove(src_clusters_mask)
-            if not os.listdir(dest_clusters_dir):
-                os.rmdir(dest_clusters_dir)
+    if not os.listdir(dest_clusters_dir):
+        os.rmdir(dest_clusters_dir)
+
+    # Merge final results
+    if args.vectorization.do_merge_results:
+        merge_final_results(
+            src_target=dest_vectors_dir, 
+            src_output=os.path.dirname(dest_vectors_dir),
+            verbose=args.verbose,
+            )
 
     # Show duration of process
     delta_time_loop = time() - start_time

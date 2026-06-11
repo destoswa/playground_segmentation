@@ -1,8 +1,13 @@
+dataset:
+  mode: auto # choose 'auto' for dataset splitted automatically or 'split' for training and validation sets already separated manualy 
+  dataset_dir: data/dataset_segmentation_playground   # if using mode 'auto'
+  trainset_dir: data/splitset_Bern_v2_training        # if using mode 'split'
+  valset_dir: data/splitset_Bern_v2_validation        # if using mode 'split'
 train:
   output_dir: "results/training"  # where to save resulting model
   output_suffixe: test_production # what suffixe for the resulting folder (data and time will be automatically added in name to avoid overrights)
   val_split: 0.1                  # which fraction of the dataset is used for the validation (the rest will go for training set)
-  frac_data: 0.01                 # how much of the dataset will be used in total (mostly used in developing phase)
+  frac_data: 1.0                  # how much of the dataset will be used in total (mostly used in developing phase)
   num_epochs: 2                   # number of time the full dataset is passed through the training loop
   batch_size: 4                   # number of samples loaded at the same time in the VRAM
   num_workers: 4                  # how many CPU processes are used by the DataLoader to prepare the batches
@@ -16,13 +21,8 @@ train:
   existing_dir: results/training/failed_training        # path to the failed training
   do_data_augmentation: True                            # to process flipping and rotation of the samples during training phase (recommanded!)
   do_da_scaling: False                                  # to process random scaling of the samples during training phase (not recommanded. multiple resolutions of the samples are already prepared during the preprocessing phase)
-  do_save_best_preds: True                              # if the best predictions of the validation set are to be saved (will appear in logs\best_preds)
+  do_save_best_preds: False                              # if the best predictions of the validation set are to be saved (will appear in logs\best_preds)
   base_model: nvidia/segformer-b0-finetuned-ade-512-512 # if not training from a pretrained model, here is the name of the model retrieved from the web (list of available models under)
-dataset:
-  mode: auto # choose 'auto' for dataset splitted automatically or 'split' for training and validation sets already separated manualy 
-  dataset_dir: data/dataset_segmentation_playground   # if using mode 'auto'
-  trainset_dir: data/splitset_Bern_v2_training        # if using mode 'split'
-  valset_dir: data/splitset_Bern_v2_validation        # if using mode 'split'
 
 
   # list of pretrained models:
