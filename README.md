@@ -93,10 +93,17 @@ A few important parameters:
 - `train\from_pretrain`: In most of the case, you will want to finetune the existing model. Therefore, this parameter should be set to True, with the root of the of the model specified in `pretrain_dir`.
 - `train\do_save_best_preds`: If you want to see how the best version of the model performed on the validation set, you can set it to True. The results will be visible in the subfolder _logs_ of the result.
 
+!! It is worth noting that the model will train on every subfolders containing `images` and `masks` in the given dataset so no need to move every samples in one only folder `images` and one only folder `masks` !!
+
 ### Preprocessing
 The preprocessing is a tool that help to prepare a dataset from a set of tiles of bigger size (e.g. 4100px) centered on the object of interest, to cropped version (e.g. 512px) of different scales. It is run through the script `preprocessing.yaml`, drive by teh configuration file `config\preprocessing.yaml`
 
-As explained in the figure, 16 versions of the dataset (more precisaly, it is producing $N_{central squares} \cdot N_{scales}$ datasets) are produced. The idea is then for the user to choose, for each scale, the version with the central square which offers the best ratio of empty/occupied samples. This ratio can be seen for each configuration in the generated figure `fraction_of_occupied.png` in the resulting folder.
+As explained in the figure, 16 versions of the dataset are produced (more precisaly, it is producing $N_{central squares} \cdot N_{scales}$ datasets). The idea is then for the user to choose, for each scale, the version with the central square offering the best ratio of empty/occupied samples. This ratio can be seen for each configuration in the generated figure `fraction_of_occupied.png` in the resulting folder.
+Two different folders are created:
+- `dataset_segmenter_multi_bases_<SUFFIXE>`: this folder contains every combination of dataset with each having the architectures `images`, `labels` and `masks`
+- `dataset_segmenter_<SUFFIXE>`: this folder is empty. it has been created to place the $N_{scales}$ chosen datasets inside it.
+
+!! It is worth noting that the model will train on every subfolders containing `images` and `masks` in the given dataset so no need to move every samples in one only folder `images` and one only folder `masks` !!
 
 ![preprocessing schema](medias/preprocessing.png)
 

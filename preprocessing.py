@@ -148,23 +148,25 @@ def preprocessing(args):
     print("PRODUCING DATASET FOR SEGMENTATION:")
     dataset_base_src = os.path.join(RESULTS_SRC, f"dataset_segmenter_{SUFFIXE}")
     os.makedirs(dataset_base_src, exist_ok=True)
-    os.makedirs(os.path.join(dataset_base_src, 'images'), exist_ok=True)
-    os.makedirs(os.path.join(dataset_base_src, 'masks'), exist_ok=True)
-    os.makedirs(os.path.join(dataset_base_src, 'labels'), exist_ok=True)
+    # os.makedirs(os.path.join(dataset_base_src, 'images'), exist_ok=True)
+    # os.makedirs(os.path.join(dataset_base_src, 'masks'), exist_ok=True)
+    # os.makedirs(os.path.join(dataset_base_src, 'labels'), exist_ok=True)
     dataset_base_src = os.path.join(RESULTS_SRC, f"dataset_segmenter_multi_bases_{SUFFIXE}")
     os.makedirs(dataset_base_src, exist_ok=True)
 
     count_empties = np.zeros((len(BASE_SQUARES), len(SCALES), 2))
-    for id_base, base_size in enumerate(BASE_SQUARES):
-        print(f"Base size = {base_size}")
-        src_results = os.path.join(dataset_base_src, f"base_size_{base_size}")
+    for id_scale, scale in enumerate(SCALES):
+        print(f"Scale = {scale}")
+        src_results = os.path.join(dataset_base_src, f"scale_{scale}")
         os.makedirs(src_results, exist_ok=True)
-        lst_src_scales = [os.path.join(src_results, f'res_{s}') for s in SCALES]
-        for scale_dir in lst_src_scales:
-            os.makedirs(scale_dir, exist_ok=True)
-            os.makedirs(os.path.join(scale_dir, 'images'), exist_ok=True)
-            os.makedirs(os.path.join(scale_dir, 'masks'), exist_ok=True)
-            os.makedirs(os.path.join(scale_dir, 'labels'), exist_ok=True)
+
+        lst_src_bases = [os.path.join(src_results, f'scale_{scale}_base_size_{x}') for x in BASE_SQUARES]
+
+        for base_dir in lst_src_bases:
+            os.makedirs(base_dir, exist_ok=True)
+            os.makedirs(os.path.join(base_dir, 'images'), exist_ok=True)
+            os.makedirs(os.path.join(base_dir, 'masks'), exist_ok=True)
+            os.makedirs(os.path.join(base_dir, 'labels'), exist_ok=True)
 
         for _, img_name in tqdm(enumerate(list_tiles_img), total=len(list_tiles_img)):
             src_img = os.path.join(TILES_IMG_SRC, img_name)
@@ -172,16 +174,16 @@ def preprocessing(args):
             img_arr = np.moveaxis(rasterio.open(src_img).read(), 0, 2)
             mask_arr = np.moveaxis(rasterio.open(src_mask).read(), 0, 2)
 
-            A_img = img_arr.shape[0] * img_arr.shape[1]
-            A_samp = (base_size)**2
-            num_max_samples = int(round(A_img/A_samp/2, 0))
 
-            for i in range(min(NUM_SAMPLES_PER_TILE, num_max_samples)):
+            for id_base, base_size in enumerate(BASE_SQUARES):
+                A_img = img_arr.shape[0] * img_arr.shape[1]
+                A_samp = (base_size)**2
+                num_max_samples = int(round(A_img/A_samp/2, 0))
                 samp_img_arr, samp_label_arr = extract_random_sample(img_arr, mask_arr, base_size, CROP_SIZE)
-                for id_scale, scale in enumerate(SCALES):
-                    src_img_out = os.path.join(lst_src_scales[id_scale], 'images', os.path.splitext(img_name)[0] + f"_scale_{scale}_{i}.tif")
-                    src_label_out = os.path.join(lst_src_scales[id_scale], 'labels', os.path.splitext(img_name)[0] + f"_scale_{scale}_{i}.tif")
-                    src_mask_out = os.path.join(lst_src_scales[id_scale], 'masks', os.path.splitext(img_name)[0] + f"_scale_{scale}_{i}.tif")
+                for i in range(min(NUM_SAMPLES_PER_TILE, num_max_samples)):
+                    src_img_out = os.path.join(lst_src_bases[id_base], 'images', os.path.splitext(img_name)[0] + f"_scale_{scale}_base_square_{base_size}_{i}.tif")
+                    src_label_out = os.path.join(lst_src_bases[id_base], 'labels', os.path.splitext(img_name)[0] + f"_scale_{scale}_base_square_{base_size}_{i}.tif")
+                    src_mask_out = os.path.join(lst_src_bases[id_base], 'masks', os.path.splitext(img_name)[0] + f"_scale_{scale}_base_square_{base_size}_{i}.tif")
                     
                     cropped_img_arr = center_crop(samp_img_arr, int(CROP_SIZE * scale))
                     resized_img_arr = resize_to(cropped_img_arr, SAMPLE_SIZE_SEGMENT)
@@ -195,17 +197,16 @@ def preprocessing(args):
                     tiff.imwrite(src_mask_out, resized_mask_arr, compression="zstd", compressionargs={"level": 9})
 
                     if np.sum(resized_mask_arr[:-1,...] > 0) == 0:
-                        count_empties[id_base, id_scale, 0] += 1
+                        count_empties[id_scale, id_base, 0] += 1
                     else:
-                        count_empties[id_base, id_scale, 1] += 1
+                        count_empties[id_scale, id_base, 1] += 1
 
         # Plot occupied
         results_frac_arr = count_empties / len(list_tiles_img) * 100
 
         linestyles = ['-', '-.', '--', ':', '-', '--', '-.', ':']  # repeats if N > 8
         markers = ['o', 's', '^', 'D', 'v', 'P', '*', 'X']        # repeats if N > 8
-        size = [3, 2, 1.5, 1.0]
-        fig, ax = plt.subplots(figsize=(10, 8))
+        _, ax = plt.subplots(figsize=(10, 8))
         for i, (curve, label) in enumerate(zip(results_frac_arr[:, :, 1].T, SCALES)):
             ax.plot(curve,
                     label=label,
