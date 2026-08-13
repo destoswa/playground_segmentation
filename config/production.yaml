@@ -1,6 +1,6 @@
 data:
   source: data/test_20_tuiles/images              # path of the folder with the images to process
-  results: data/test_20_tuiles/th=0.35                # where to place the results. If Default, predict next to source
+  results: data/test_20_tuiles/th=0.10                # where to place the results. If Default, predict next to source
 downloader: # more details on this tool in the readme on section Production/downloader
   skip_auto_downloading: True     # if True, it will skip the downloading part and use the existing data. If False, it will download images from swisstopo using parameters of this section
   dest_not_empty: replace         # what to do if there is already tiles in the source folder. Choose between 'add', 'stop', 'replace'
@@ -15,7 +15,7 @@ downloader: # more details on this tool in the readme on section Production/down
 predictions:
   model_dir: models/segmenter_playground
   batch_size: 4                   # number of images loaded at once in the VRAM
-  threshold_preds: 0.35           # threshold on probas above which the pixel is classified as playground.
+  threshold_preds: 0.1           # threshold on probas above which the pixel is classified as playground.
   tile_size: 512                  # need to be adequate with the structure of the model (do not touch!)
   overlap: 256                    # how much overlap is used between two images analyzed by the sliding window
   scales: [1.0, 0.75, 0.5, 0.25]  # list of scales used. bigger scales = more details, smaller scales = more context

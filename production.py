@@ -62,25 +62,25 @@ def tiles_downloading(
     N = [x.split('_')[1] for x in ids]
     EN = [[int(x), int(y)] for x,y in zip(E,N)]
 
-    if downloading_mode in ['canton', 'area']:
-
+    if downloading_mode == 'canton':
+        cantons = gpd.read_file('utils/resources/swissboundaries/swissBOUNDARIES3D_1_5_TLM_KANTONSGEBIET.shp')
+        if canton not in cantons.NAME.values:
+            raise AttributeError(f"The given canton's name is not correct. Please choos between the following: \n {cantons.NAME.values}")
+        
+        canton_polygons = cantons[cantons.NAME == canton]
+        # make sure CRS match
+        if tiles_locs.crs != canton_polygons.crs:
+            tiles_locs = tiles_locs.to_crs(canton_polygons.crs)
+        # spatial join - keep tiles that intersect Vaud
+        tiles_vaud = gpd.sjoin(tiles_locs, canton_polygons, how="inner", predicate="intersects")
+        tiles_to_download = [[int(x) for x in tile.split('_')] for tile in tiles_vaud.id.to_list()]
+        print(f"Processing canton {canton} with {len(tiles_to_download)} tiles:")
+    elif downloading_mode == 'area':
         # find area of interest
-        (Emin, Emax, Nmin, Nmax) = (0,0,0,0)
-        if downloading_mode == 'canton':
-            cantons = gpd.read_file('utils/resources/swissboundaries/swissBOUNDARIES3D_1_5_TLM_KANTONSGEBIET.shp')
-            if canton not in cantons.NAME.values:
-                raise AttributeError(f"The given canton's name is not correct. Please choos between the following: \n {cantons.NAME.values}")
-            
-            canton_polygons = cantons[cantons.NAME == canton]
-            Emin = int(canton_polygons.bounds.minx.values[0] // 1000)
-            Emax = int((canton_polygons.bounds.maxx.values[0] + 1) // 1000)
-            Nmin = int(canton_polygons.bounds.miny.values[0] // 1000)
-            Nmax = int((canton_polygons.bounds.maxy.values[0] + 1) // 1000)
-        elif downloading_mode == 'area':
-            Emin = int(area.Emin)
-            Emax = int(area.Emax)
-            Nmin = int(area.Nmin)
-            Nmax = int(area.Nmax)
+        Emin = int(area.Emin)
+        Emax = int(area.Emax)
+        Nmin = int(area.Nmin)
+        Nmax = int(area.Nmax)
 
         tiles_to_download = [x for x in EN if Emin <= x[0] <= Emax and Nmin <= x[1] <= Nmax]
 
@@ -92,11 +92,8 @@ def tiles_downloading(
         |               |
     ({Emin},{Nmin}) --- ({Emax+1},{Nmin})
     """
-        if downloading_mode == 'canton':
-            print(f"Processing canton {canton} with following area ({len(tiles_to_download)} tiles):")
-        else:
-            print(f"Processing following area ({len(tiles_to_download)} tiles):")
-        print(text)
+        print(f"Processing following area ({len(tiles_to_download)} tiles):\n{text}")
+
     elif downloading_mode in ['year', 'full']:
         
         tiles_to_download = EN
