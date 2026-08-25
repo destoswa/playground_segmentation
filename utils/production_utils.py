@@ -233,120 +233,229 @@ def predict(image, model_dir, img_path=None, tile_size=512, stride=256, th=0.5, 
     return final_labels, rgb_labels, final_prob
 
 
-def predict_batch_array(
-    model,
-    batch,
-    device="cuda",
-):
-    """
-    Run batched inference on image tiles using a segmentation model.
-    Parameters:
-        model (torch.nn.Module) - segmentation model.
-        batch (torch.Tensor) - batch of images with shape (B, H, W, 3).
-        device (str) - computation device ("cuda" or "cpu").
-    Returns:
-        torch.Tensor - upsampled logits with shape (B, C, H, W).
-    """
+# def predict_batch_array(
+#     model,
+#     batch,
+#     device="cuda",
+# ):
+#     """
+#     Run batched inference on image tiles using a segmentation model.
+#     Parameters:
+#         model (torch.nn.Module) - segmentation model.
+#         batch (torch.Tensor) - batch of images with shape (B, H, W, 3).
+#         device (str) - computation device ("cuda" or "cpu").
+#     Returns:
+#         torch.Tensor - upsampled logits with shape (B, C, H, W).
+#     """
 
-    assert batch.ndim == 4 and batch.shape[-1] == 3
+#     assert batch.ndim == 4 and batch.shape[-1] == 3
 
-    _, H, W, _ = batch.shape
-    batch = batch.permute(0, 3, 1, 2)                  # (B, 3, H, W)
+#     _, H, W, _ = batch.shape
+#     batch = batch.permute(0, 3, 1, 2)                  # (B, 3, H, W)
+#     batch = batch.float() / 255.0
+#     mean = torch.tensor([0.485, 0.456, 0.406], device=device).view(1,3,1,1)
+#     std  = torch.tensor([0.229, 0.224, 0.225], device=device).view(1,3,1,1)
+#     batch = (batch - mean) / std
+
+#     with torch.no_grad(), torch.autocast("cuda", dtype=torch.float16):
+#         logits = model(batch).logits  # (B,C,h,w)
+
+#         logits = F.interpolate(
+#             logits,
+#             size=(H, W),
+#             mode="bilinear",
+#             align_corners=False
+#         )
+
+#     return logits  # keep on GPU
+
+
+# def predict_with_batch(image, model, img_path=None, batch_size=8, tile_size=512, stride=256, th=0.5, do_show=True, do_save=True, do_save_mask_as_img=True):
+#     """
+#     Perform sliding-window batched inference using a segmentation model.
+#     Parameters:
+#         image (str | PIL.Image) - input image path or PIL image.
+#         model (torch.nn.Module) - trained segmentation model.
+#         img_path (str | None) - original image path used for saving outputs.
+#         batch_size (int) - number of tiles processed simultaneously.
+#         tile_size (int) - size of sliding-window tiles.
+#         stride (int) - stride between tiles.
+#         th (float) - probability threshold for generating binary predictions.
+#         do_show (bool) - whether to display results.
+#         do_save (bool) - whether to save prediction outputs.
+#         do_save_mask_as_img (bool) - whether to save an RGB visualization mask.
+#     Returns:
+#         tuple - binary prediction mask, RGB visualization mask, and probability map.
+#     """
+#     if not isinstance(image, Image.Image):
+#         img_path = image
+#         image = Image.open(image)
+#     img_arr = np.array(image)[...,:3]
+
+#     img_padded, _, _ = mirror_pad_image(img_arr, tile_size, stride)
+#     H_original, W_original  = img_arr.shape[:2]
+#     H, W = img_padded.shape[:2]
+    
+#     # prepare arrays
+#     prob_acc = torch.zeros((H,W), device=model.device)
+#     weight_acc = torch.zeros((H,W), device=model.device)
+
+#     list_xpos = range(0, W - tile_size + 1, stride)
+#     list_ypos = range(0, H - tile_size + 1, stride)
+#     list_positions = list(product(list_xpos, list_ypos))
+
+#     batch = torch.zeros((batch_size, tile_size, tile_size, 3), device=model.device)
+#     initial_poses = []
+
+#     for id_sample, (x,y) in enumerate(list_positions):
+#         x0 = min(x, W - tile_size)
+#         y0 = min(y, H - tile_size)
+#         tile = torch.tensor(img_padded[y0:y0 + tile_size, x0:x0 + tile_size, :])
+#         batch[id_sample % batch_size, ...] = tile
+#         initial_poses.append((x0, y0))
+
+#         # Crop region (handles border tiles automatically)
+#         if (id_sample > 0 and (id_sample + 1) % batch_size == 0) or id_sample == len(list_positions) - 1:
+#             logits = predict_batch_array(model, batch, model.device)
+#             probs = torch.softmax(logits, dim=1)[:, ]
+
+#             for i in range(len(initial_poses)):
+#                 xi, yi = initial_poses[i]
+#                 prob_acc[yi:yi+tile_size, xi:xi+tile_size] += probs[i, 1, ...].reshape((tile_size, tile_size))
+#                 weight_acc[yi:yi+tile_size, xi:xi+tile_size] += 1
+
+#             batch = torch.zeros((batch_size, tile_size, tile_size, 3), device=model.device)
+#             initial_poses = []
+
+#     final_prob = torch.divide(prob_acc, weight_acc)[0:H_original, 0:W_original].cpu().numpy()
+    
+#     final_labels = np.zeros(final_prob.shape, dtype=np.uint8)
+#     final_labels[final_prob >= th] = 1
+
+#     src_dest_preds_mask = os.path.splitext(img_path)[0] + f'_preds_mask.tif'
+#     src_dest_preds_img = os.path.splitext(img_path)[0] + f'_preds_img.tif'
+
+#     rgb_labels = np.zeros((final_labels.shape[0], final_labels.shape[1], 3), dtype=np.uint8)
+#     rgb_labels[final_labels == 1] = 255
+#     if do_save:
+#         os.makedirs(os.path.dirname(src_dest_preds_mask), exist_ok=True)
+#         tiff.imwrite(src_dest_preds_mask, final_labels, compression="zstd", compressionargs={"level": 9})
+#         if do_save_mask_as_img:
+#             tiff.imwrite(src_dest_preds_img, rgb_labels, compression="zstd", compressionargs={"level": 9})
+    
+#     if do_show:
+#         plt.imshow(Image.fromarray(rgb_labels.astype(np.uint8), mode="RGB"))
+
+#     return final_labels, rgb_labels, final_prob
+
+# ======================================
+# generated by claude bellow
+
+_MEAN = None
+_STD = None
+ 
+def _norm_stats(device):
+    global _MEAN, _STD
+    if _MEAN is None or _MEAN.device != torch.device(device):
+        _MEAN = torch.tensor([0.485, 0.456, 0.406], device=device).view(1, 3, 1, 1)
+        _STD = torch.tensor([0.229, 0.224, 0.225], device=device).view(1, 3, 1, 1)
+    return _MEAN, _STD
+
+def predict_batch_array(model, batch, device="cuda"):
+    """
+    batch: (B, 3, H, W) float tensor already on GPU, NOT yet normalized.
+    Returns upsampled logits (B, C, H, W).
+    """
+    mean, std = _norm_stats(device)
     batch = batch.float() / 255.0
-    mean = torch.tensor([0.485, 0.456, 0.406], device=device).view(1,3,1,1)
-    std  = torch.tensor([0.229, 0.224, 0.225], device=device).view(1,3,1,1)
     batch = (batch - mean) / std
-
-    with torch.no_grad(), torch.autocast("cuda", dtype=torch.float16):
-        logits = model(batch).logits  # (B,C,h,w)
-
-        logits = F.interpolate(
-            logits,
-            size=(H, W),
-            mode="bilinear",
-            align_corners=False
-        )
-
-    return logits  # keep on GPU
-
-
-def predict_with_batch(image, model, img_path=None, batch_size=8, tile_size=512, stride=256, th=0.5, do_show=True, do_save=True, do_save_mask_as_img=True):
+ 
+    with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
+        logits = model(batch).logits
+        logits = F.interpolate(logits, size=batch.shape[-2:], mode="bilinear", align_corners=False)
+    return logits
+ 
+ 
+def extract_tiles_gpu(img_padded_np, tile_size, stride, device):
     """
-    Perform sliding-window batched inference using a segmentation model.
-    Parameters:
-        image (str | PIL.Image) - input image path or PIL image.
-        model (torch.nn.Module) - trained segmentation model.
-        img_path (str | None) - original image path used for saving outputs.
-        batch_size (int) - number of tiles processed simultaneously.
-        tile_size (int) - size of sliding-window tiles.
-        stride (int) - stride between tiles.
-        th (float) - probability threshold for generating binary predictions.
-        do_show (bool) - whether to display results.
-        do_save (bool) - whether to save prediction outputs.
-        do_save_mask_as_img (bool) - whether to save an RGB visualization mask.
-    Returns:
-        tuple - binary prediction mask, RGB visualization mask, and probability map.
+    Move the whole padded image to GPU once, then extract ALL tiles with
+    a single vectorized unfold call. Returns:
+        tiles: (N, 3, tile_size, tile_size)
+        positions: list[(x0, y0)] aligned with tiles
     """
+    H, W = img_padded_np.shape[:2]
+    img_gpu = torch.from_numpy(img_padded_np).to(device, non_blocking=True)  # (H, W, 3)
+    img_gpu = img_gpu.permute(2, 0, 1).unsqueeze(0).float()  # (1, 3, H, W)
+ 
+    # unfold along H then W
+    patches = img_gpu.unfold(2, tile_size, stride).unfold(3, tile_size, stride)
+    # patches: (1, 3, nH, nW, tile_size, tile_size)
+    _, C, nH, nW, th, tw = patches.shape
+    tiles = patches.permute(0, 2, 3, 1, 4, 5).reshape(nH * nW, C, th, tw).contiguous()
+ 
+    ys = torch.arange(nH) * stride
+    xs = torch.arange(nW) * stride
+    yy, xx = torch.meshgrid(ys, xs, indexing="ij")
+    positions = list(zip(xx.flatten().tolist(), yy.flatten().tolist()))
+ 
+    return tiles, positions
+ 
+ 
+def predict_with_batch(image, model, img_path=None, batch_size=64, tile_size=512,
+                        stride=256, th=0.5, do_show=True, do_save=True, do_save_mask_as_img=True):
     if not isinstance(image, Image.Image):
         img_path = image
         image = Image.open(image)
-    img_arr = np.array(image)[...,:3]
-
+    img_arr = np.array(image)[..., :3]
+ 
     img_padded, _, _ = mirror_pad_image(img_arr, tile_size, stride)
-    H_original, W_original  = img_arr.shape[:2]
+    H_original, W_original = img_arr.shape[:2]
     H, W = img_padded.shape[:2]
-    
-    # prepare arrays
-    prob_acc = torch.zeros((H,W), device=model.device)
-    weight_acc = torch.zeros((H,W), device=model.device)
-
-    list_xpos = range(0, W - tile_size + 1, stride)
-    list_ypos = range(0, H - tile_size + 1, stride)
-    list_positions = list(product(list_xpos, list_ypos))
-
-    batch = torch.zeros((batch_size, tile_size, tile_size, 3), device=model.device)
-    initial_poses = []
-
-    for id_sample, (x,y) in enumerate(list_positions):
-        x0 = min(x, W - tile_size)
-        y0 = min(y, H - tile_size)
-        tile = torch.tensor(img_padded[y0:y0 + tile_size, x0:x0 + tile_size, :])
-        batch[id_sample % batch_size, ...] = tile
-        initial_poses.append((x0, y0))
-
-        # Crop region (handles border tiles automatically)
-        if (id_sample > 0 and (id_sample + 1) % batch_size == 0) or id_sample == len(list_positions) - 1:
-            logits = predict_batch_array(model, batch, model.device)
-            probs = torch.softmax(logits, dim=1)[:, ]
-
-            for i in range(len(initial_poses)):
-                xi, yi = initial_poses[i]
-                prob_acc[yi:yi+tile_size, xi:xi+tile_size] += probs[i, 1, ...].reshape((tile_size, tile_size))
-                weight_acc[yi:yi+tile_size, xi:xi+tile_size] += 1
-
-            batch = torch.zeros((batch_size, tile_size, tile_size, 3), device=model.device)
-            initial_poses = []
-
+    device = model.device
+ 
+    prob_acc = torch.zeros((H, W), device=device)
+    weight_acc = torch.zeros((H, W), device=device)
+ 
+    # One-shot GPU tile extraction: no per-tile Python loop, no per-tile H2D copy
+    all_tiles, all_positions = extract_tiles_gpu(img_padded, tile_size, stride, device)
+    n_tiles = all_tiles.shape[0]
+ 
+    for start in range(0, n_tiles, batch_size):
+        end = min(start + batch_size, n_tiles)
+        batch = all_tiles[start:end]  # already on GPU, just a view/slice -> free
+ 
+        logits = predict_batch_array(model, batch, device)
+        probs = torch.softmax(logits, dim=1)
+ 
+        for i, (xi, yi) in enumerate(all_positions[start:end]):
+            prob_acc[yi:yi + tile_size, xi:xi + tile_size] += probs[i, 1]
+            weight_acc[yi:yi + tile_size, xi:xi + tile_size] += 1
+ 
     final_prob = torch.divide(prob_acc, weight_acc)[0:H_original, 0:W_original].cpu().numpy()
-    
+ 
     final_labels = np.zeros(final_prob.shape, dtype=np.uint8)
     final_labels[final_prob >= th] = 1
-
-    src_dest_preds_mask = os.path.splitext(img_path)[0] + f'_preds_mask.tif'
-    src_dest_preds_img = os.path.splitext(img_path)[0] + f'_preds_img.tif'
-
-    rgb_labels = np.zeros((final_labels.shape[0], final_labels.shape[1], 3), dtype=np.uint8)
+ 
+    src_dest_preds_mask = os.path.splitext(img_path)[0] + '_preds_mask.tif'
+    src_dest_preds_img = os.path.splitext(img_path)[0] + '_preds_img.tif'
+ 
+    rgb_labels = np.zeros((*final_labels.shape, 3), dtype=np.uint8)
     rgb_labels[final_labels == 1] = 255
+ 
     if do_save:
         os.makedirs(os.path.dirname(src_dest_preds_mask), exist_ok=True)
         tiff.imwrite(src_dest_preds_mask, final_labels, compression="zstd", compressionargs={"level": 9})
         if do_save_mask_as_img:
             tiff.imwrite(src_dest_preds_img, rgb_labels, compression="zstd", compressionargs={"level": 9})
-    
+ 
     if do_show:
+        import matplotlib.pyplot as plt
         plt.imshow(Image.fromarray(rgb_labels.astype(np.uint8), mode="RGB"))
-
+ 
     return final_labels, rgb_labels, final_prob
+
+# generated by claude on top
+# ===================================
 
 
 def produce_with_lower_res(src_img, src_dest, res_frac, do_save=True, do_show=True):

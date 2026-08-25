@@ -29,7 +29,7 @@ to install this pipeline, you need to have CUDA installed on your machine and fo
     ```
     pip install -r requirements.txt
     ```
-
+    <span style='color:red'>Depending on the setup (CUDA installation), you might need to reinstall torch, torchvision and torchaudio. For more information, look at <a href="https://pytorch.org">pytorch website</a></span>
 ## Introduction
 This repo contains a pipeline made to practice binary semantic segmentation. The pretrained model has been finetuned to discriminate playgrounds from background in aerial images with original resolution of 10cm/pixel.
 
