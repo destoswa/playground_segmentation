@@ -163,9 +163,11 @@ def prediction(
         probas.append(proba_img)
 
     # merge different resolutions into one final
-    original_img = Image.open(src_img)
+    with Image.open(src_img) as original_img:
+        W, H = original_img.size
+    # original_img = Image.open(src_img)
 
-    W, H = original_img.size
+    # W, H = original_img.size
 
     final_probas = np.zeros((W,H), dtype=np.float32)
 

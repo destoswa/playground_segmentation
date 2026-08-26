@@ -361,6 +361,7 @@ def _norm_stats(device):
         _STD = torch.tensor([0.229, 0.224, 0.225], device=device).view(1, 3, 1, 1)
     return _MEAN, _STD
 
+
 def predict_batch_array(model, batch, device="cuda"):
     """
     batch: (B, 3, H, W) float tensor already on GPU, NOT yet normalized.
@@ -403,10 +404,16 @@ def extract_tiles_gpu(img_padded_np, tile_size, stride, device):
  
 def predict_with_batch(image, model, img_path=None, batch_size=64, tile_size=512,
                         stride=256, th=0.5, do_show=True, do_save=True, do_save_mask_as_img=True):
+    # if not isinstance(image, Image.Image):
+    #     img_path = image
+    #     image = Image.open(image)
+    # img_arr = np.array(image)[..., :3]
     if not isinstance(image, Image.Image):
         img_path = image
-        image = Image.open(image)
-    img_arr = np.array(image)[..., :3]
+        with Image.open(image) as im:
+            img_arr = np.array(im)[..., :3]
+    else:
+        img_arr = np.array(image)[..., :3]
  
     img_padded, _, _ = mirror_pad_image(img_arr, tile_size, stride)
     H_original, W_original = img_arr.shape[:2]
@@ -470,11 +477,12 @@ def produce_with_lower_res(src_img, src_dest, res_frac, do_save=True, do_show=Tr
     Returns:
         tuple - resized image and path to the saved image.
     """
-    img = Image.open(src_img)
-    res_original = img.size
-    low_res = tuple([int(x * res_frac) for x in res_original])
-
-    img_low = img.resize((low_res), resample=Image.BILINEAR)
+    with Image.open(src_img) as img:
+    # img = Image.open(src_img)
+        res_original = img.size
+        low_res = tuple([int(x * res_frac) for x in res_original])
+        img_low = img.resize((low_res), resample=Image.BILINEAR)
+        
     src_final = os.path.join(src_dest, os.path.splitext(os.path.basename(src_img))[0] + f'_res_{res_frac}.tif')
     
     

@@ -112,6 +112,10 @@ With the use of the model and the correction by human eye, new data should start
 
 In order to generate this dataset, a tutorial (the file `tuto_finetuning.md`) is available at the root of the project. It will help the user to create the tiles and then use the preprocessing script.
 
+
+## Notes
+- in production phase, the encoding of the signal is done on bfloat16 in order to avoid overflow problems. If your graphic card does not support those, you will need to go change this to float16 in `production_utils.predict_batch_array` in the `torch.autocast()` function.
+
 ## Acknowledgements
 This project was done by using both the [Transformers](https://huggingface.co/docs/transformers/index) library and the 
 [SegFormer](https://huggingface.co/docs/transformers/model_doc/segformer) model of Huggingface.
