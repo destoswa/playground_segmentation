@@ -1,5 +1,5 @@
 data:
-  source: D:\GitHubProjects\Terranum_repo\PlaygroundsDetection\data\test_segmentation              # path of the folder with the images to process
+  source: data/test              # path of the folder with the images to process
   results: default                # where to place the results. If Default, predict next to source
 downloader: # more details on this tool in the readme on section Production/downloader
   skip_auto_downloading: True     # if True, it will skip the downloading part and use the existing data. If False, it will download images from swisstopo using parameters of this section

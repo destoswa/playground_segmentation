@@ -9,6 +9,7 @@ from tqdm import tqdm
 from PIL import Image
 from sklearn.cluster import DBSCAN
 import rasterio
+import scipy.ndimage as ndi
 from rasterio.features import shapes
 from shapely.geometry import shape
 from shapely.affinity import affine_transform
@@ -204,7 +205,7 @@ def prediction(
     if do_save_probas:
         tiff.imwrite(src_final_probas_mask, final_probas, compression="zstd", compressionargs={"level": 9})
 
-    return final_product, src_final_preds_mask, src_final_preds_img, src_final_probas_mask#, src_final_probas_img
+    return final_product, final_probas, src_final_preds_mask, src_final_preds_img, src_final_probas_mask #, src_final_probas_img
 
 
 def clustering(
@@ -216,18 +217,18 @@ def clustering(
         color_palette, 
         do_save_img=True,
         ):
-    # extract coordinates of landslides
-    pos_ls = np.argwhere(img_arr)
+    # extract coordinates of positives
+    pos_val = np.argwhere(img_arr)
 
-    mask_clusters = np.zeros(img_arr.shape)
+    mask_clusters = np.zeros(img_arr.shape, dtype=np.uint16)
 
-    if len(pos_ls) > 0:
+    if len(pos_val) > 0:
         # create cluster map
-        clustering = DBSCAN(eps=eps, min_samples=min_samples, n_jobs=2).fit(pos_ls)
+        clustering = DBSCAN(eps=eps, min_samples=min_samples, n_jobs=2).fit(pos_val)
 
         # unpack coordinates
-        rows = pos_ls[:, 0]
-        cols = pos_ls[:, 1]
+        rows = pos_val[:, 0]
+        cols = pos_val[:, 1]
 
         # remove noise
         labels = clustering.labels_
@@ -267,28 +268,81 @@ def clustering(
         tiff.imwrite(src_img, rgb_clusters.astype(np.uint8), compression="zstd", compressionargs={"level": 9})
     tiff.imwrite(src_mask, mask_clusters.astype(np.uint16), compression="zstd", compressionargs={"level": 9})
 
-    return src_mask, src_img
+    return mask_clusters, src_mask, src_img
 
 
-def vectorize(src_target, src_dest):
+# def vectorize(src_target, clusters_arr, probas_arr, src_dest):
+#     with rasterio.open(src_target) as src:
+#         # mask = src.read(1)
+#         transform = src.transform
+#         crs = src.crs
+
+#     if np.sum(clusters_arr) == 0:
+#         return
+
+#     records = [
+#         {"geometry": shape(geom), "raster_val": value}
+#         for geom, value in shapes(clusters_arr, transform=transform)
+#         if value != 0
+#     ]
+
+#     gdf = gpd.GeoDataFrame(records, crs=crs)
+
+#     # apply affine transform if original masks are note georeferenced
+#     if transform == rasterio.transform.IDENTITY and crs is None:
+#         # Flip Y coordinates to match raster display (y → height - y)
+#         gdf["geometry"] = gdf["geometry"].apply(
+#             lambda geom: affine_transform(geom, [1, 0, 0, -1, 0, 0])
+#         )
+
+#     src_polygons = os.path.join(src_dest, os.path.splitext(os.path.basename(src_target))[0] + '_playgrounds.gpkg')
+#     gdf.to_file(src_polygons, layer='polygons', driver="GPKG")
+
+#     # compute centroids
+#     geometry_points = gdf.geometry.centroid
+#     gdf_centroids = gpd.GeoDataFrame(gdf, geometry=geometry_points, crs=crs)
+#     gdf_centroids.to_file(src_polygons, layer='centroids', driver="GPKG")
+
+#     return src_polygons
+
+
+def vectorize(src_target, clusters_arr, probas_arr, src_dest):
     with rasterio.open(src_target) as src:
-        mask = src.read(1)
-        if np.sum(mask) == 0:
-            return
         transform = src.transform
         crs = src.crs
 
+    if np.sum(clusters_arr) == 0:
+        return
+
     records = [
-        {"geometry": shape(geom), "raster_val": value}
-        for geom, value in shapes(mask, transform=transform)
+        {"geometry": shape(geom), "cluster_val": value}
+        for geom, value in shapes(clusters_arr, transform=transform)
         if value != 0
     ]
 
     gdf = gpd.GeoDataFrame(records, crs=crs)
 
-    # apply affine transform if original masks are note georeferenced
+    # --- vectorized per-cluster mean/median, no explicit loop over clusters ---
+    # raster_val from `shapes` comes back as float; cast to match clusters_arr's
+    # integer label dtype so it lines up exactly with ndi's label ids.
+    gdf["cluster_val"] = gdf["cluster_val"].astype(clusters_arr.dtype)
+    label_ids = gdf["cluster_val"].unique()
+
+    probas_arr = (probas_arr / 255 * 100).astype(np.uint8)
+    means = np.round(ndi.mean(probas_arr, labels=clusters_arr, index=label_ids)).astype(np.uint8)
+    medians = np.asarray(ndi.median(probas_arr, labels=clusters_arr, index=label_ids), dtype=np.uint8)
+    minimum = np.asarray(ndi.minimum(probas_arr, labels=clusters_arr, index=label_ids), dtype=np.uint8)
+    maximum = np.asarray(ndi.maximum(probas_arr, labels=clusters_arr, index=label_ids), dtype=np.uint8)
+
+    stats_lookup = {lbl: (m, med, min, max) for lbl, m, med, min, max in zip(label_ids, means, medians, minimum, maximum)}
+    gdf["proba_mean"] = gdf["cluster_val"].map(lambda v: stats_lookup[v][0])
+    gdf["proba_median"] = gdf["cluster_val"].map(lambda v: stats_lookup[v][1])
+    gdf["proba_min"] = gdf["cluster_val"].map(lambda v: stats_lookup[v][2])
+    gdf["proba_max"] = gdf["cluster_val"].map(lambda v: stats_lookup[v][3])
+    # ---------------------------------------------------------------------------
+
+    # apply affine transform if original masks are not georeferenced
     if transform == rasterio.transform.IDENTITY and crs is None:
-        # Flip Y coordinates to match raster display (y → height - y)
         gdf["geometry"] = gdf["geometry"].apply(
             lambda geom: affine_transform(geom, [1, 0, 0, -1, 0, 0])
         )
@@ -296,13 +350,12 @@ def vectorize(src_target, src_dest):
     src_polygons = os.path.join(src_dest, os.path.splitext(os.path.basename(src_target))[0] + '_playgrounds.gpkg')
     gdf.to_file(src_polygons, layer='polygons', driver="GPKG")
 
-    # compute centroids
+    # compute centroids — proba_mean/proba_median columns carry over automatically
     geometry_points = gdf.geometry.centroid
     gdf_centroids = gpd.GeoDataFrame(gdf, geometry=geometry_points, crs=crs)
     gdf_centroids.to_file(src_polygons, layer='centroids', driver="GPKG")
 
     return src_polygons
-
 
 def merge_final_results(src_target, src_output, verbose=False):
     list_files = [os.path.join(src_target, x) for x in os.listdir(src_target) if x.endswith('.gpkg')]
@@ -315,19 +368,25 @@ def merge_final_results(src_target, src_output, verbose=False):
     polygons_list = []
     centroids_list = []
 
-    for f in list_files:
+    for _, f in tqdm(enumerate(list_files), total=len(list_files), desc="Merging"):
         gdf_polygons = gpd.read_file(f, layer='polygons')
         gdf_centroids = gpd.read_file(f, layer='centroids')
 
         # Extract polygons
-        poly = gdf_polygons[['geometry']].copy()  # adjust fields as needed
-        poly['update_state'] = None
+        poly = gdf_polygons.copy()  # adjust fields as needed
+        poly['category'] = None
+        cols = poly.columns.tolist()
+        cols = cols[-1:] + cols[1:-1]
+        poly = poly[cols]
         poly['source'] = os.path.basename(f)
         polygons_list.append(poly)
 
         # Extract centroids
-        cent = gdf_centroids[['geometry']].copy()  # adjust fields as needed
-        cent['update_state'] = None
+        cent = gdf_centroids.copy()  # adjust fields as needed
+        cent['category'] = None 
+        cols = cent.columns.tolist()
+        cols = cols[-1:] + cols[1:-1]
+        cent = cent[cols]
         cent['source'] = os.path.basename(f)
         centroids_list.append(cent)
 
@@ -420,7 +479,7 @@ def production(args):
     for _, src_img in tqdm(enumerate(lst_tiles_src), total=len(lst_tiles_src), desc="Processing tiles"):
         # === PREDICTIONS =====
         # =====================
-        pred_mask_arr, src_pred_mask, src_pred_img, src_proba_mask = prediction(
+        pred_mask_arr, probas_arr, src_pred_mask, src_pred_img, src_proba_mask = prediction(
             src_img=src_img,
             src_inter=dest_inter_dir,
             src_dest_preds=dest_preds_dir, 
@@ -446,7 +505,7 @@ def production(args):
         with open(SRC_COLOR_PALETTE, 'r') as f:
             color_palette = json.load(f)
 
-        src_clusters_mask, src_clusters_img = clustering(
+        clusters_arr, src_clusters_mask, src_clusters_img = clustering(
             img_arr=pred_mask_arr,
             src_dest=os.path.join(dest_clusters_dir, os.path.basename(src_img)),
             eps= EPS, 
@@ -457,14 +516,13 @@ def production(args):
             )
 
         # georeference files
+        geo_transfert(src_img, src_clusters_mask, True)
         if KEEP_MASK_BIN:
             geo_transfert(src_img, src_pred_mask, True)
         if KEEP_MASK_IMG:
             geo_transfert(src_img, src_pred_img, True)
         if KEEP_PROBAS:
             geo_transfert(src_img, src_proba_mask, True)
-        # if KEEP_CLUSTER_MONO:
-        geo_transfert(src_img, src_clusters_mask, True)
         if KEEP_CLUSTER_IMG:
             geo_transfert(src_img, src_clusters_img, True)
         
@@ -474,7 +532,7 @@ def production(args):
                 geo_transfert(src_img, src_inter)
 
         # vectorize if any cluster found
-        vectorize(src_clusters_mask, dest_vectors_dir)
+        vectorize(src_clusters_mask, clusters_arr, probas_arr, dest_vectors_dir)
 
         if not KEEP_CLUSTER_MONO:
             os.remove(src_clusters_mask)
@@ -483,6 +541,7 @@ def production(args):
 
     # Merge final results
     if args.vectorization.do_merge_results:
+        print("Merging files:")
         merge_final_results(
             src_target=dest_vectors_dir, 
             src_output=os.path.dirname(dest_vectors_dir),
