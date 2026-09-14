@@ -44,7 +44,10 @@ class SegmentationDataset(Dataset):
 
     def __getitem__(self, idx):
         image = rasterio.open(self.images[idx]).read()[:self.num_layers, ...]
-        mask = rasterio.open(self.masks[idx]).read().squeeze(0)
+        mask = rasterio.open(self.masks[idx]).read()
+        if mask.shape[0] != 1:
+            raise ImportError("The following mask does not have only one band: ", self.masks[idx])
+        mask = mask.squeeze(0)
 
         # Apply augmentation
         if self.transform is not None:

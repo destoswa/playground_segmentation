@@ -250,8 +250,8 @@ def training(args):
         metric_for_best_model="mean_dice",       # Adjust if using other metrics
 
         # Others
-        fp16=False,                          # Mixed precision (if GPU supports)
-        bf16=True,
+        fp16=True,                          # Mixed precision (if GPU supports)
+        bf16=False,
         prediction_loss_only=False,
         gradient_accumulation_steps=1,      # Increase effective batch size if needed
         dataloader_num_workers=NUM_WORKERS,           # Adjust according to CPU cores

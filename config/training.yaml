@@ -1,14 +1,14 @@
 dataset:
   mode: auto # choose 'auto' for dataset splitted automatically or 'split' for training and validation sets already separated manualy 
-  dataset_dir: data/dataset_segmentation_playground   # if using mode 'auto'
+  dataset_dir: data/dataset_5000_for_finetuning   # if using mode 'auto'
   trainset_dir: data/splitset_Bern_v2_training        # if using mode 'split'
   valset_dir: data/splitset_Bern_v2_validation        # if using mode 'split'
 train:
   output_dir: "results/training"  # where to save resulting model
-  output_suffixe: test_production # what suffixe for the resulting folder (data and time will be automatically added in name to avoid overrights)
+  output_suffixe: finetuning_5000_epoch_10_lr_5e-5 # what suffixe for the resulting folder (data and time will be automatically added in name to avoid overrights)
   val_split: 0.1                  # which fraction of the dataset is used for the validation (the rest will go for training set)
   frac_data: 1.0                  # how much of the dataset will be used in total (mostly used in developing phase)
-  num_epochs: 2                   # number of time the full dataset is passed through the training loop
+  num_epochs: 10                   # number of time the full dataset is passed through the training loop
   batch_size: 4                   # number of samples loaded at the same time in the VRAM
   num_workers: 4                  # how many CPU processes are used by the DataLoader to prepare the batches
   learning_rate: 5e-5             # has been finetuned. do not touch
