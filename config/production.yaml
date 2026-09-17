@@ -1,6 +1,6 @@
 data:
-  source: data\test_20_tuiles\images              # path of the folder with the images to process
-  results: data\test_20_tuiles\finetuning_epochs_10_lr_5e-5_0.5                # where to place the results. If Default, predict next to source
+  source: data\test_continue_prod\images              # path of the folder with the images to process
+  results: data\test_continue_prod\results                # where to place the results. If Default, predict next to source
 downloader: # more details on this tool in the readme on section Production/downloader
   skip_auto_downloading: True     # if True, it will skip the downloading part and use the existing data. If False, it will download images from swisstopo using parameters of this section
   dest_not_empty: replace         # what to do if there is already tiles in the source folder. Choose between 'add', 'stop', 'replace'

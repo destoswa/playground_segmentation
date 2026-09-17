@@ -17,6 +17,8 @@ from omegaconf import OmegaConf
 from time import time
 import torch
 import tifffile as tiff
+import tkinter as tk
+from tkinter import messagebox as mb
 
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -34,6 +36,24 @@ warnings.filterwarnings(
     "ignore",
     category=NotGeoreferencedWarning
 )
+
+
+STATE_FILE_NAME = ".processing_state.log"
+
+
+def load_completed_tiles(state_file):
+    if not os.path.exists(state_file):
+        return set()
+    with open(state_file, "r") as f:
+        # ignore a possibly-truncated last line if the process died mid-write
+        return set(line.strip() for line in f if line.strip())
+
+
+def mark_tile_done(state_file, tile_name):
+    with open(state_file, "a") as f:
+        f.write(tile_name + "\n")
+        f.flush()
+        os.fsync(f.fileno())
 
 
 def tiles_downloading(
@@ -236,74 +256,41 @@ def clustering(
         rows = rows[valid]
         cols = cols[valid]
         labels = labels[valid]
-        labels[labels == 0] = np.max(labels) + 1
 
-        # count cluster sizes (FAST)
-        unique, counts = np.unique(labels, return_counts=True)
+        if len(labels) > 0:
+            labels[labels == 0] = np.max(labels) + 1
 
-        # find clusters to keep
-        keep_clusters = unique[counts >= min_cluster_size]
+            # count cluster sizes (FAST)
+            unique, counts = np.unique(labels, return_counts=True)
 
-        # mask of points to keep
-        keep_mask = np.isin(labels, keep_clusters)
+            # find clusters to keep
+            keep_clusters = unique[counts >= min_cluster_size]
 
-        # now write ONLY good points to image
-        mask_clusters[rows[keep_mask], cols[keep_mask]] = labels[keep_mask]
+            # mask of points to keep
+            keep_mask = np.isin(labels, keep_clusters)
 
-        # saving image version
-        if do_save_img:
-            rgb_clusters = np.zeros((mask_clusters.shape[0], mask_clusters.shape[1], 4))
-            lst_clusters = set(keep_clusters)
-            distinct_colors_rgb8 = [(x, y, z, 255) for [x,y,z] in color_palette]
-
-            for cluster in lst_clusters:
-                id_color = cluster % len(distinct_colors_rgb8)
-                rgb_clusters[mask_clusters == cluster] = distinct_colors_rgb8[id_color]
+            # now write ONLY good points to image
+            mask_clusters[rows[keep_mask], cols[keep_mask]] = labels[keep_mask]
 
     # save results
-    src_mask = os.path.splitext(src_dest)[0] + f'_clusters_eps_{eps}_min_samp_{min_samples}_mask.tif'
     src_img = os.path.splitext(src_dest)[0] + f'_clusters_eps_{eps}_min_samp_{min_samples}_img.tif'
-
+    src_mask = os.path.splitext(src_dest)[0] + f'_clusters_eps_{eps}_min_samp_{min_samples}_mask.tif'
+    #   _save image version
     if do_save_img:
+        rgb_clusters = np.zeros((mask_clusters.shape[0], mask_clusters.shape[1], 4))
+        lst_clusters = set(keep_clusters)
+        distinct_colors_rgb8 = [(x, y, z, 255) for [x,y,z] in color_palette]
+
+        for cluster in lst_clusters:
+            id_color = cluster % len(distinct_colors_rgb8)
+            rgb_clusters[mask_clusters == cluster] = distinct_colors_rgb8[id_color]
+
         tiff.imwrite(src_img, rgb_clusters.astype(np.uint8), compression="zstd", compressionargs={"level": 9})
+
+    #   _save mask anyway to reuse for vectors later
     tiff.imwrite(src_mask, mask_clusters.astype(np.uint16), compression="zstd", compressionargs={"level": 9})
 
     return mask_clusters, src_mask, src_img
-
-
-# def vectorize(src_target, clusters_arr, probas_arr, src_dest):
-#     with rasterio.open(src_target) as src:
-#         # mask = src.read(1)
-#         transform = src.transform
-#         crs = src.crs
-
-#     if np.sum(clusters_arr) == 0:
-#         return
-
-#     records = [
-#         {"geometry": shape(geom), "raster_val": value}
-#         for geom, value in shapes(clusters_arr, transform=transform)
-#         if value != 0
-#     ]
-
-#     gdf = gpd.GeoDataFrame(records, crs=crs)
-
-#     # apply affine transform if original masks are note georeferenced
-#     if transform == rasterio.transform.IDENTITY and crs is None:
-#         # Flip Y coordinates to match raster display (y → height - y)
-#         gdf["geometry"] = gdf["geometry"].apply(
-#             lambda geom: affine_transform(geom, [1, 0, 0, -1, 0, 0])
-#         )
-
-#     src_polygons = os.path.join(src_dest, os.path.splitext(os.path.basename(src_target))[0] + '_playgrounds.gpkg')
-#     gdf.to_file(src_polygons, layer='polygons', driver="GPKG")
-
-#     # compute centroids
-#     geometry_points = gdf.geometry.centroid
-#     gdf_centroids = gpd.GeoDataFrame(gdf, geometry=geometry_points, crs=crs)
-#     gdf_centroids.to_file(src_polygons, layer='centroids', driver="GPKG")
-
-#     return src_polygons
 
 
 def vectorize(src_target, clusters_arr, probas_arr, src_dest):
@@ -476,6 +463,21 @@ def production(args):
     os.makedirs(dest_clusters_dir, exist_ok=True)
     os.makedirs(dest_vectors_dir, exist_ok=True)
 
+    # verify if part of the production has already been made
+    state_file = os.path.join(DEST_PREDS, STATE_FILE_NAME)
+    completed = load_completed_tiles(state_file)
+
+    remaining_tiles = [t for t in lst_tiles_src if os.path.basename(t) not in completed]
+
+    if len(completed) > 0:
+        root = tk.Tk()
+        root.withdraw() 
+        res=mb.askquestion('Continue ?', f'{len(completed)} tiles already done, {len(remaining_tiles)} remaining". Do you want to resume from there? (if no, will start from scratch)')
+        root.destroy()
+        if res == 'yes' :
+            lst_tiles_src = remaining_tiles
+
+    # Start looping on the tiles
     for _, src_img in tqdm(enumerate(lst_tiles_src), total=len(lst_tiles_src), desc="Processing tiles"):
         # === PREDICTIONS =====
         # =====================
@@ -536,6 +538,9 @@ def production(args):
 
         if not KEEP_CLUSTER_MONO:
             os.remove(src_clusters_mask)
+
+        mark_tile_done(state_file, os.path.basename(src_img))  # only on full success
+
     if not os.listdir(dest_clusters_dir):
         os.rmdir(dest_clusters_dir)
 
@@ -547,6 +552,7 @@ def production(args):
             src_output=os.path.dirname(dest_vectors_dir),
             verbose=args.verbose,
             )
+
 
     # Show duration of process
     delta_time_loop = time() - start_time
