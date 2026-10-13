@@ -1,8 +1,10 @@
 preprocessing:
-  tiles_location: D:\Terranum_SD\99_Data\Playground\Vaud\5000_410m_samples\Extents           # the path to the tiles to be augmented
-  results_location: D:\Terranum_SD\99_Data\Playground\Vaud\5000_410m_samples\Extents\preprocessing # where the architecture of the resulting samples is going to be saved
-  suffixe: Vaud_5000_first                         # the suffixe to the architecture name
+  tiles_location: D:\Terranum_SD\99_Data\Playground\Vaud_finetuning_2\temp\Extents\Playgrounds           # the path to the tiles to be augmented
+  results_location: D:\Terranum_SD\99_Data\Playground\Vaud_finetuning_2\temp\Extents\multi_process # where the architecture of the resulting samples is going to be saved
+  suffixe: test                         # the suffixe to the architecture name
   base_squares: [256, 512, 768, 1024]               # the different center squares used for the random shifts
   scales: [1.0, 0.75, 0.5, 0.25]                    # the different scales of output results
   sample_size: 512                                  # the size of the resulting samples
   num_samples_per_tile: 1                           # how many samples are extracted from each tile for each set of (baset_square, scale)
+  do_multi_proc: True
+  frac_workers: 1.0
